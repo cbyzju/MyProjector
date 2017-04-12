@@ -20,8 +20,8 @@ int  main(int argc, char* argv[])
 
 	AstraData astradata;
 	astradata.init_IR();
-	Mat outImg, outImg1, outImg2, outImg3, sumImg, averaImg, binary, lastIr, finalMap;
-	vector<Mat> histHands;
+	cv::Mat outImg, outImg1, outImg2, outImg3, sumImg, averaImg, binary, lastIr, finalMap;
+	vector<cv::Mat> histHands;
 	vector<vector<int>> histVal(100);
 	int frameId(0);
 	while (1)
@@ -31,16 +31,17 @@ int  main(int argc, char* argv[])
 			continue;
 
 		//get depth data
-		Mat depthImg, colorImg, foregImg, distanTras;
+		cv::Mat depthImg, colorImg, foregImg, distanTras;
 		depthImg = astradata.cvRawImg16U.clone();
 		colorImg = astradata.cvIrImg.clone();
 		depthImg.convertTo(depthImg, CV_32F);
-		flip(colorImg, colorImg, 1);
-		flip(depthImg, depthImg, 1);		
+		cv::flip(colorImg, colorImg, 1);
+		cv::flip(depthImg, depthImg, 1);		
 		
 		rsPeojection.depthImg = depthImg;
 		if (!rsPeojection.calibrated) rsPeojection.calibrationFixed();
 		rsPeojection.processing(colorImg, depthImg);
+		
 
 	}
 	return 0;

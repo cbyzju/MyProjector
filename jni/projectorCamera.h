@@ -23,6 +23,9 @@ note:       projectorCamera system processing file
 #include <opencv2/imgproc/imgproc.hpp>
 #include <fstream>
 #include <iomanip>
+#include <pcl/io/pcd_io.h>
+#include <pcl/registration/icp.h>
+#include <pcl/point_types.h>
 
 #define SCREEN_WIDTH_PX  1280
 #define SCREEN_HEIGHT_PX 720
@@ -30,24 +33,24 @@ note:       projectorCamera system processing file
 
 struct StereoProjection
 {
-	vector<Point2f> cameraVertex;
-	vector<Point2f> projectorVertex;
-	vector<Point3f> proVertex3D;
+	vector<cv::Point2f> cameraVertex;
+	vector<cv::Point2f> projectorVertex;
+	vector<cv::Point3f> proVertex3D;
 	vector<float>   vertexDepth;
 	vector<TouchHand> curtHands;
 	vector<TouchHand> lastHands;
-	Point2f center;
+	cv::Point2f center;
 	int lastId,first;
 	bool valid,boatDemo;
 	StereoProjection() :valid(false),lastId(0),first(0){};
 };
 
 struct ObjectInfo{
-    Mat object;
-    Rect rec;
+    cv::Mat object;
+    cv::Rect rec;
     float maxdepth,cArea;
     vector<float> angles;
-    vector<Point> contour;
+    vector<cv::Point> contour;
 };
 
 class ProjectorCamera
@@ -59,8 +62,8 @@ public:
 	void init();
 	void calibration();
 	void calibrationFixed();
-	void processing(Mat& colorSrc, Mat& depthSrc);
-	bool isHistContinue(Mat&);
+	void processing(cv::Mat& colorSrc, cv::Mat& depthSrc);
+	bool isHistContinue(cv::Mat&);
 	void getBgDepth();
 	void getDynamicBgDepth();
 	void getFgDepth();
@@ -69,47 +72,47 @@ public:
 	void findOnDeskObject();
 	void findInAirObject();
 	void findInAirGesture();
-	void refineRect(Rect& rec, Mat image);
+	void refineRect(cv::Rect& rec, cv::Mat image);
 	void refineFingerPosition(int);
 	void transAxisCameraToPro();
-	void fillDepthImageHole(Mat &);
-	void convertFloatToChar(Mat& src, Mat& dst);
-	void fingerTipDepthDistribution(Point2f&,float&,float&);
+	void fillDepthImageHole(cv::Mat &);
+	void convertFloatToChar(cv::Mat& src, cv::Mat& dst);
+	void fingerTipDepthDistribution(cv::Point2f&,float&,float&);
 	int  intersectionPointsWithBoard(ObjectInfo&);
-	Rect palmRectangle(ObjectInfo&);
+	cv::Rect palmRectangle(ObjectInfo&);
 	void palmInfor(ObjectInfo&, TouchHand&);
-	float contourAverageDepth(vector<Point>&);
+	float contourAverageDepth(vector<cv::Point>&);
 	float caclAngle(TouchHand&,int);
-	float caclAngleForInAirGesture(Point& left, Point& center, Point& right);
+	float caclAngleForInAirGesture(cv::Point& left, cv::Point& center, cv::Point& right);
 	string  intTostring(int);
-    Point2f fingerDirection(Point2f, Point2f, Point2f);
-	void calibDepToPro(vector<Point2f>&, vector<float>&, vector<Point3f>&);
-	void calibDepToPro(vector<Point2f>&, vector<float>&, vector<Point2f>&);
-	Point2f calibDepToPro(Point2f p_cam, float depth);
-	void calibCamToPro(vector<Point2f>&, vector<float>&, vector<Point3f>&);
-	void calibCamToPro(vector<Point2f>&, vector<float>&, vector<Point2f>&);
-	Point2f calibCamToPro(Point2f p_cam, float depth);
-	Point2f homogCamToPro(Point2f);	
-	void refineVerticals(vector<Point3f>&);
-	void clockwiseContour(vector<Point2f>&);
-	void clockwiseContour(vector<Point>&);
+    cv::Point2f fingerDirection(cv::Point2f, cv::Point2f, cv::Point2f);
+	void calibDepToPro(vector<cv::Point2f>&, vector<float>&, vector<cv::Point3f>&);
+	void calibDepToPro(vector<cv::Point2f>&, vector<float>&, vector<cv::Point2f>&);
+	cv::Point2f calibDepToPro(cv::Point2f p_cam, float depth);
+	void calibCamToPro(vector<cv::Point2f>&, vector<float>&, vector<cv::Point3f>&);
+	void calibCamToPro(vector<cv::Point2f>&, vector<float>&, vector<cv::Point2f>&);
+	cv::Point2f calibCamToPro(cv::Point2f p_cam, float depth);
+	cv::Point2f homogCamToPro(cv::Point2f);	
+	void refineVerticals(vector<cv::Point3f>&);
+	void clockwiseContour(vector<cv::Point2f>&);
+	void clockwiseContour(vector<cv::Point>&);
 
 	//zhangbo
-    bool isHandGraspOrOpen(double& handRatio, int& approxCurveSize, int& hullsize, int& littleangle, int& distance_x,int& distance_y,Point& centerpoint);
-    int handWaveState(vector<Point>& pointsInLastFrames);
-	Point CalculateSumofPoints(Point pointA, Point pointB);
-    void findConvexityDefects(vector<Point>& contour, vector<int>& hull, vector<ConvexityDefect>& convexDefects);
+    bool isHandGraspOrOpen(double& handRatio, int& approxCurveSize, int& hullsize, int& littleangle, int& distance_x,int& distance_y,cv::Point& centerpoint);
+    int handWaveState(vector<cv::Point>& pointsInLastFrames);
+	cv::Point CalculateSumofPoints(cv::Point pointA, cv::Point pointB);
+    void findConvexityDefects(vector<cv::Point>& contour, vector<int>& hull, vector<ConvexityDefect>& convexDefects);
     void inAirGestureManage(bool& openstate, int& handwave);
 
 
 	//images 
-	Mat colorImg, depthImg, irImage, depthImg_old, binaryCopy;
-	Mat averaImg, foreground, foreground_store, foreground_copy, averaIR;		
-	vector<Mat> bgdepths;
-	Mat hist, homo;
+	cv::Mat colorImg, depthImg, irImage, depthImg_old, binaryCopy;
+	cv::Mat averaImg, foreground, foreground_store, foreground_copy, averaIR;		
+	vector<cv::Mat> bgdepths;
+	cv::Mat hist, homo;
 
 	//rectangle
-	Rect screenRoi,filterRoi;
+	cv::Rect screenRoi,filterRoi;
 
 	//parameters
 	bool calibrated, initBg, setViewDepth;
@@ -134,16 +137,16 @@ public:
 
     //procamera calibration
     string cablibParaFilePath;
-    Mat colToProR, colToProT;
-    Mat depToColR, depToColT;
-    Mat camera_KK, camera_dis;
-    Mat project_KK, project_dis;
-    Mat depth_KK, depth_dis; 
+    cv::Mat colToProR, colToProT;
+    cv::Mat depToColR, depToColT;
+    cv::Mat camera_KK, camera_dis;
+    cv::Mat project_KK, project_dis;
+    cv::Mat depth_KK, depth_dis; 
 
     //homography
-    Mat depToColHomo;
-    Mat colToProHomo;
-    Mat depToProHomo;
+    cv::Mat depToColHomo;
+    cv::Mat colToProHomo;
+    cv::Mat depToProHomo;
 
     //state model role
     Role fingerTouchRole;
@@ -155,7 +158,7 @@ public:
     //in air gesture variables
 	int ncount_totalimg, ncount_grasp;
 	int ncount_totalimg_open, ncount_open;
-	vector<Point>pointsInLastFrames;
+	vector<cv::Point>pointsInLastFrames;
 	//InAirGestureInfo inairgesture;
 	vector<bool> handgraspstates_temp;//hand grasp
     vector<int> handwavestates;//hand wave

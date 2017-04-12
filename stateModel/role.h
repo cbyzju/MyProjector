@@ -26,7 +26,6 @@ note:       procamera interactive base state file
 #define CURT_OTHER_TOUCH  8
 
 using namespace std;
-using namespace cv;
 
 class Role
 {

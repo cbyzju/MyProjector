@@ -30,7 +30,7 @@ TouchHand::TouchHand()
 	palmRadius = -1;
 	//radius in mm
 	realRadius = -1;
-	palmCenter = Point(-1,-1);
+	palmCenter = cv::Point(-1,-1);
 }
 
 /*!

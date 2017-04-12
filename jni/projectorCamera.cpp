@@ -10,7 +10,7 @@ note:       projectorCamera system processing file
 
 #include "projectorCamera.h"
 
-
+ 
 /*!
 @function              sort points
 @abstract              point comparison by location
@@ -18,7 +18,7 @@ note:       projectorCamera system processing file
 @param
 @result
 */
-bool cmpPoint(Point2f& pt1, Point2f& pt2)
+bool cmpPoint(cv::Point2f& pt1, cv::Point2f& pt2)
 {
 	//high priority sort y
 	if (abs(pt1.y - pt2.y) > 10)
@@ -57,8 +57,8 @@ ProjectorCamera::ProjectorCamera()
 	offset_y    = 0;
 
 	//rectangle
-	screenRoi   = Rect(100, 100, 500, 300);
-	filterRoi   = Rect(48, 35, 40, 30);
+	screenRoi   = cv::Rect(100, 100, 500, 300);
+	filterRoi   = cv::Rect(48, 35, 40, 30);
 
 	//zhangbo
 	ncount_totalimg = 0;
@@ -102,8 +102,8 @@ void ProjectorCamera::init()
 	//calibration result data	
 	LOGD("try to open procamera_calib_paras.xml, %s", cablibParaFilePath.c_str());
 
-	FileStorage fsin;
-	fsin.open("./procamera_calib_paras.xml", FileStorage::READ);
+	cv::FileStorage fsin;
+	fsin.open("./procamera_calib_paras.xml", cv::FileStorage::READ);
 	if (!fsin.isOpened())
 	{
 		LOGD("failed to open file procamera_calib_paras.xml");
@@ -137,7 +137,7 @@ void ProjectorCamera::init()
 @param
 @result
 */
-bool ProjectorCamera::isHistContinue(Mat& object)
+bool ProjectorCamera::isHistContinue(cv::Mat& object)
 {
 	//LOGF("Processing flow : %s", "isHistContinue start");
 
@@ -150,7 +150,7 @@ bool ProjectorCamera::isHistContinue(Mat& object)
 	const int histSize[1] = { 4 };
 	float hranges[2] = { 5, 13 };
 	const float* ranges[1] = { hranges };
-	calcHist(&object, 1, channel, Mat(), hist, 1, histSize, ranges);
+	calcHist(&object, 1, channel, cv::Mat(), hist, 1, histSize, ranges);
 
 	//checkout hist is continue or not
 	for (int row = 1; row < hist.rows; row++)
@@ -197,8 +197,8 @@ void ProjectorCamera::calibrationFixed()
     LOGF("Processing flow : %s", "calibrationFixed start");
 
 	//image setting
-	homo = Mat::eye(3, 3, CV_64F);	
-	homo = (Mat_<double>(3, 3) <<
+	homo = cv::Mat::eye(3, 3, CV_64F);	
+	homo = (cv::Mat_<double>(3, 3) <<
 			2.5797362305397424e+000, -3.7274467612214901e-001,
 			4.2250897290272846e+001, 5.4430909225976175e-003,
 			2.5050769943386775e+000, -4.7408720715676232e+001,
@@ -229,8 +229,8 @@ void ProjectorCamera::calibration()
 
     //image setting
     colorImg = colorImg(screenRoi);
-	Mat src  = colorImg,src_gray;
-	cvtColor(src, src_gray, 6);
+	cv::Mat src  = colorImg,src_gray;
+	cv::cvtColor(src, src_gray, 6);
 
 	//Corner finding parameters
 	double qualityLevel = 0.01;
@@ -238,15 +238,15 @@ void ProjectorCamera::calibration()
 	int    blockSize = 3;
 	double k = 0.04;
 	bool useHarrisDetector = false;
-	vector<Point2f> corners;
+	vector<cv::Point2f> corners;
 
 	//Apply corner detection :Determines strong corners on an image.
-	goodFeaturesToTrack(src_gray,
+	cv::goodFeaturesToTrack(src_gray,
 		corners,
 		400,
 		qualityLevel,
 		minDistance,
-		Mat(),
+		cv::Mat(),
 		blockSize,
 		useHarrisDetector,
 		k);
@@ -265,22 +265,22 @@ void ProjectorCamera::calibration()
 			i--;
 			continue;
 		}
-		circle(src, corners[i], 1, Scalar(0, 0, 255));
+		cv::circle(src, corners[i], 1, cv::Scalar(0, 0, 255));
 	}//End all points
 
 	//save corner points image
-    imwrite("/sdcard/calibration.jpg", src);
+    cv::imwrite("/sdcard/calibration.jpg", src);
 
 	//sort corner points
 	sort(corners.begin(), corners.end(), cmpPoint);
 
 	//calculate the screen corresponding points
-	vector<Point2f> vscreenPoints;
-	vscreenPoints.push_back(Point2f(gridstart_x, gridstart_y));
-	Point2f lastRowStartPoint(corners[0]);
+	vector<cv::Point2f> vscreenPoints;
+	vscreenPoints.push_back(cv::Point2f(gridstart_x, gridstart_y));
+	cv::Point2f lastRowStartPoint(corners[0]);
     for (int i = 1; i < corners.size(); i++)
     {
-    	Point2f last = vscreenPoints[i - 1];
+    	cv::Point2f last = vscreenPoints[i - 1];
     	if (corners[i].y - corners[i-1].y > 10)
     	{
     		int scalar = 0;
@@ -312,7 +312,7 @@ void ProjectorCamera::calibration()
 	//calculate homography
 	if(corners.size()>100)
 	{
-	     homo = cv::findHomography(corners, vscreenPoints, LMEDS);//LMEDS RANSAC
+	     homo = cv::findHomography(corners, vscreenPoints, CV_LMEDS);//LMEDS RANSAC
 	     LOGC("calibration stage homography1: %f", homo.at<double>(0,0));
 	     LOGC("calibration stage homography2: %f", homo.at<double>(0,1));
 	     LOGC("calibration stage homography3: %f", homo.at<double>(0,2));
@@ -329,8 +329,8 @@ void ProjectorCamera::calibration()
 	}
 
 	//test homegraphy
-	vector<Point2f> testH(corners.size());
-	perspectiveTransform(corners, testH, homo);
+	vector<cv::Point2f> testH(corners.size());
+	cv::perspectiveTransform(corners, testH, homo);
 	float maxsub(0);
 	for (int i = 0; i < corners.size(); i++)
 	{
@@ -369,7 +369,7 @@ void ProjectorCamera::getBgDepth()
 	}
 	else if (frameId == initFrames + 1)
 	{
-	    averaImg = Mat(depthImg.rows, depthImg.cols,CV_32F);
+	    averaImg = cv::Mat(depthImg.rows, depthImg.cols,CV_32F);
         //every pixel
         for (int row = 0; row < depthImg.rows; row++)
 		{
@@ -422,7 +422,7 @@ void ProjectorCamera::getFgDepth()
 	//get absolute depth image
 	foreground = abs(depthImg - averaImg);
 		
-	threshold(foreground, foreground, nearSurFaceThresh, 255, CV_THRESH_TOZERO);
+	cv::threshold(foreground, foreground, nearSurFaceThresh, 255, CV_THRESH_TOZERO);
 
     //cvtColor(foreground,foreground_copy,8);
     //imwrite("/sdcard/foreground_copy.jpg",foreground_copy);
@@ -437,7 +437,7 @@ void ProjectorCamera::getFgDepth()
 @param
 @result
 */
-void ProjectorCamera::processing(Mat& iRSrc, Mat& depthSrc)
+void ProjectorCamera::processing(cv::Mat& iRSrc, cv::Mat& depthSrc)
 {
     //LOGF("Processing flow : %s", "processing start");
 	CVTIME processingTotalTime,initTime;
@@ -463,9 +463,9 @@ void ProjectorCamera::processing(Mat& iRSrc, Mat& depthSrc)
 	depthImg.convertTo(depthImg, CV_32F);
 
 	//ir image preprocessing
-	Rect irRoi = screenRoi;
+	cv::Rect irRoi = screenRoi;
 	irRoi.y -= 8;
-	flip(iRSrc,iRSrc,1);
+	cv::flip(iRSrc,iRSrc,1);
 	irImage  = iRSrc(irRoi);
 	colorImg = irImage;
 
@@ -557,13 +557,13 @@ void ProjectorCamera::getContour()
 {
     //detect contours in foreground image
     CVTIME findContoursTime,cvtImgTime;
-	Mat fgImage,binaryIm;
+	cv::Mat fgImage,binaryIm;
 	cvtImgTime.reset();
 	convertFloatToChar(foreground,binaryIm);
     //LOGD("nativeStart caught cvtImgTime: %f", cvtImgTime.getClock());
 
-	std::vector< std::vector<Point> > contours;
-	findContours(binaryIm, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
+	std::vector< std::vector<cv::Point> > contours;
+	cv::findContours(binaryIm, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
 	binaryCopy = binaryIm;
     //LOGD("nativeStart caught findContoursTime: %f", findContoursTime.getClock());
 
@@ -571,16 +571,16 @@ void ProjectorCamera::getContour()
     for (int i = 0; i < contours.size(); i++)
     {
         //get contour area
-		vector<Point> contour = contours[i];
-		Mat contourMat = Mat(contour);
+		vector<cv::Point> contour = contours[i];
+		cv::Mat contourMat = cv::Mat(contour);
 		double cArea = contourArea(contourMat);
 
         //min object area
         if (cArea < 300) continue;
 
         //fill hole
-		Rect rec = boundingRect(contours[i]);
-		Mat object = foreground(rec);
+		cv::Rect rec = cv::boundingRect(contours[i]);
+		cv::Mat object = foreground(rec);
 
         //exclude static object
 		double mindepth;
@@ -608,13 +608,13 @@ int  ProjectorCamera::intersectionPointsWithBoard(ObjectInfo& object)
 {
 	//get DP points of the object
 	TouchHand temHand;
-	approxPolyDP(Mat(object.contour), temHand.approxCurve, 3, true);
+	cv::approxPolyDP(cv::Mat(object.contour), temHand.approxCurve, 3, true);
 
 	//palm intersection points with border
 	int crossNum(0);
 	for (int ind = 0; ind < temHand.approxCurve.size(); ind++)
 	{
-		Point temPt = temHand.approxCurve[ind];
+		cv::Point temPt = temHand.approxCurve[ind];
 		if (temPt.x < 10 || depthImg.cols - temPt.x < 10 ||
 			temPt.y < 10 || depthImg.rows - temPt.y < 10)
 		{
@@ -633,39 +633,39 @@ int  ProjectorCamera::intersectionPointsWithBoard(ObjectInfo& object)
 @param
 @result
 */
-Rect ProjectorCamera::palmRectangle(ObjectInfo& object)
+cv::Rect ProjectorCamera::palmRectangle(ObjectInfo& object)
 {
     //LOGF("Processing flow : %s", "palmRectangle start");
 
 	//paras
-	Rect boundingBox = object.rec;
-	Rect palmRec;
-	Size bound(depthImg.size());
+	cv::Rect boundingBox = object.rec;
+	cv::Rect palmRec;
+	cv::Size bound(depthImg.size());
 	int thresh = 65;
 
     //use ir image to segment palm
 	//left
 	if (boundingBox.x == 1)
 	{
-		palmRec = Rect(std::max(0, boundingBox.width - thresh),
+		palmRec = cv::Rect(std::max(0, boundingBox.width - thresh),
 			boundingBox.y, std::min(boundingBox.width, thresh), boundingBox.height);
 	}
 	//top
 	if (boundingBox.y == 1)
 	{
-		palmRec = Rect(boundingBox.x, std::max(0, boundingBox.height - thresh),
+		palmRec = cv::Rect(boundingBox.x, std::max(0, boundingBox.height - thresh),
 			boundingBox.width, std::min(boundingBox.height, thresh));
 	}
 	//right
 	if (boundingBox.x + boundingBox.width == (bound.width - 1))
 	{
-		palmRec = Rect(boundingBox.x, boundingBox.y,
+		palmRec = cv::Rect(boundingBox.x, boundingBox.y,
 			std::min(boundingBox.width, thresh), boundingBox.height);
 	}
 	//bottom
 	if (boundingBox.y + boundingBox.height == (bound.height - 1))
 	{
-		palmRec = Rect(boundingBox.x, boundingBox.y, boundingBox.width,
+		palmRec = cv::Rect(boundingBox.x, boundingBox.y, boundingBox.width,
 			std::min(boundingBox.height, thresh));
 	}
 
@@ -684,19 +684,19 @@ void ProjectorCamera::palmInfor(ObjectInfo& object, TouchHand& curtHand)
     //LOGF("Processing flow : %s", "palmInfor start");
 
 	//distanceTransformation
-	Mat disTransResult;
-	distanceTransform(binaryCopy(object.rec), disTransResult, CV_DIST_L2, 3);
+	cv::Mat disTransResult;
+	cv::distanceTransform(binaryCopy(object.rec), disTransResult, CV_DIST_L2, 3);
 
 	//palm center and radius
-	Rect palmRec = palmRectangle(object);
+	cv::Rect palmRec = palmRectangle(object);
 	double palmMinVal(-1), palmMaxVal(-1);
-	Point  palmMinLoc(-1, -1), palmMaxLoc(-1, -1);
+	cv::Point  palmMinLoc(-1, -1), palmMaxLoc(-1, -1);
 
 	//adjust rectangle start point to object
 	palmRec.x -= object.rec.x;
 	palmRec.y -= object.rec.y;
 	refineRect(palmRec, disTransResult);
-	minMaxLoc(disTransResult(palmRec), &palmMinVal, &palmMaxVal, &palmMinLoc, &palmMaxLoc);
+	cv::minMaxLoc(disTransResult(palmRec), &palmMinVal, &palmMaxVal, &palmMinLoc, &palmMaxLoc);
 
 	//adjust rectangle start point to whole image
 	palmMaxLoc.x += object.rec.x;
@@ -721,7 +721,7 @@ void ProjectorCamera::palmInfor(ObjectInfo& object, TouchHand& curtHand)
 @param
 @result
 */
-void ProjectorCamera::fingerTipDepthDistribution(Point2f& fingerTip, float& percent, float& bfdis)
+void ProjectorCamera::fingerTipDepthDistribution(cv::Point2f& fingerTip, float& percent, float& bfdis)
 {
     //LOGF("Processing flow : %s %f %f", "fingerTipDepthDistribution start",fingerTip.x,fingerTip.y);
 
@@ -742,14 +742,14 @@ void ProjectorCamera::fingerTipDepthDistribution(Point2f& fingerTip, float& perc
 
 			if (*(depthPt + col) < 0.1 || (*(averaPt + col) < *(depthPt + col)))
 			{
-				fingerTip += Point2f(col, row);
+				fingerTip += cv::Point2f(col, row);
 				tipnum++;
 				continue;
 			}
 
 			if (*(foregPt + col) > 0)
 			{
-				fingerTip += Point2f(col, row);
+				fingerTip += cv::Point2f(col, row);
 				foresum += *(depthPt + col);
 				forenum++;
 				tipnum++;
@@ -803,7 +803,7 @@ void ProjectorCamera::findFinger()
 	stereoProjectHover.lastHands = stereoProjectHover.curtHands;
 	stereoProjectHover.curtHands.clear();
 
-	for (int ind = 0; ind < objects.size(); ind++)
+	for (int ind = 0; ind < objects.size(); ind++) //图像内共有object.size()个轮廓，其中当然也有手
 	{
 		//object intersection points with border
 		int crossNum = intersectionPointsWithBoard(objects[ind]);		
@@ -811,19 +811,19 @@ void ProjectorCamera::findFinger()
 		
 		//approxPolyDP current object coutour
 		TouchHand curtHand;
-		approxPolyDP(Mat(objects[ind].contour), curtHand.approxCurve, 10, true);
+		cv::approxPolyDP(cv::Mat(objects[ind].contour), curtHand.approxCurve, 10, true); //利用多边形拟合获得轮廓点位置
 		if (curtHand.approxCurve.size() < 3) continue;
 
 		//get convex hull
 		vector<int> hull;
-		convexHull(Mat(curtHand.approxCurve), hull, false, false);
+		cv::convexHull(cv::Mat(curtHand.approxCurve), hull, false, false); //凸包点坐标
 
 		//get palm information		
 		palmInfor(objects[ind], curtHand);
         stereoProjectHover.curtHands.push_back(curtHand);
 
 		//is palm real condition
-		LOGD("nativeStart caught in findFinger touch palmRadius%f,palmDepth%f, x%d, y%d",
+		LOGD("nativeStart caught in findFinger touch palmRadius%f,palmDepth%f, x%d, y%d\n",
 		curtHand.palmRadius,curtHand.palmDepth,curtHand.palmCenter.x,curtHand.palmCenter.y);
 		if (curtHand.palmRadius < 20 || curtHand.palmRadius > 40 ||
 		    curtHand.palmDepth  < 40 || curtHand.palmDepth > 140)
@@ -852,7 +852,7 @@ void ProjectorCamera::findFinger()
 
             //finger to palm condition
             float fingerRatio = norm(curtHand.approxCurve[index] - curtHand.palmCenter) / curtHand.palmRadius;
-            LOGD("nativeStart caught in findFinger touch palm ratio: %d %f", frameId,fingerRatio);
+            LOGD("nativeStart caught in findFinger touch palm ratio: %d %f\n", frameId,fingerRatio);
 
             //border situation
             float minRatio(1.4),maxRatio(3.5);
@@ -862,37 +862,37 @@ void ProjectorCamera::findFinger()
 
 			//angle condition
 			float angle = caclAngle(curtHand, index);
-			LOGD("nativeStart caught in findFinger angle: %f", angle);
+			LOGD("nativeStart caught in findFinger angle: %f\n", angle);
 			if (angle > 70) continue;
 
-			//finger roi
+			//finger roi 手指区域
 			int radius = 12;
-			Rect figerRec = Rect(Point_x - radius, Point_y - radius, 2 * radius, 2 * radius);
+			cv::Rect figerRec = cv::Rect(Point_x - radius, Point_y - radius, 2 * radius, 2 * radius);
 			refineRect(figerRec, foreground);
-			Mat fingerRoi = foreground(figerRec);
+			cv::Mat fingerRoi = foreground(figerRec);
 
 			//finger roi condition 1
 			double mindepth, maxdepth(0);
-			minMaxLoc(fingerRoi, &mindepth, &maxdepth);			
+			cv::minMaxLoc(fingerRoi, &mindepth, &maxdepth);			
 			//if (maxdepth > 50 && maxdepth < 750) continue;
-			LOGD("nativeStart caught in findFinger maxdepth: %f", maxdepth);
+			LOGD("nativeStart caught in findFinger maxdepth: %f\n", maxdepth);
 
 			//finger roi depth distribution
-			Point2f fingerTip = curtHand.approxCurve[index];
+			cv::Point2f fingerTip = curtHand.approxCurve[index];
 			float forenum(0),bfdis(1000);
 			fingerTipDepthDistribution(fingerTip, forenum, bfdis);
 
             //string name = "/sdcard/bbb_" + intTostring(frameId) + ".png";
             //imwrite(name,fingerRoi);
 
-            Mat disFinger,disResult;
+            cv::Mat disFinger,disResult;
             convertFloatToChar(fingerRoi,disFinger);
-            distanceTransform(disFinger, disResult, CV_DIST_L2, 3);
+            cv::distanceTransform(disFinger, disResult, CV_DIST_L2, 3);
             double minVal, maxVal;
-            minMaxLoc(disResult, &minVal, &maxVal);
+            cv::minMaxLoc(disResult, &minVal, &maxVal);
 
 			//finger roi depth distribution condition
-			LOGD("nativeStart caught in findFinger bfdis: %f %f %f", bfdis, forenum, maxVal);
+			LOGD("nativeStart caught in findFinger bfdis: %f %f %f\n", bfdis, forenum, maxVal);
 			if (bfdis > 10 && bfdis < 100 && fingerRatio > 2.3)  existFinger = true;
 			if (bfdis > 5 || forenum < 17 || maxVal < 4) continue;
 			//if (!isHistContinue(fingerRoi) && (curtHand.palmCenter.y < depthImg.rows - 15)) continue;
@@ -905,7 +905,7 @@ void ProjectorCamera::findFinger()
 			touchPoint.bottomDepth    = depthImg.at<float>(curtHand.palmCenter);
 			touchPoint.getAngle();
 			touchPoint.getOrien();
-			touchPoint.palmToTip = touchPoint.tipPosition - Point2f(curtHand.palmCenter.x, curtHand.palmCenter.y);
+			touchPoint.palmToTip = touchPoint.tipPosition - cv::Point2f(curtHand.palmCenter.x, curtHand.palmCenter.y);
 			touchPoint.frameId   = frameId;
 			touchPoint.isReal    = true;
 			touchPoint.tipInPro  = calibDepToPro(touchPoint.tipPosition, touchPoint.tipDepth);
@@ -929,7 +929,7 @@ void ProjectorCamera::findFinger()
 		{
 			float palmDis = norm(vtouchHand_last[handInd].palmCenter - curtHand.palmCenter);
 
-			LOGD("nativeStart caught in findFinger insert touchPoint: %d firstId%d palmDis%f lastid%d oldDepth%f curDepth%f histSize%d curtSize%d",
+			LOGD("nativeStart caught in findFinger insert touchPoint: %d firstId%d palmDis%f lastid%d oldDepth%f curDepth%f histSize%d curtSize%d\n",
 				frameId, fingerTouchRole.firstTouchId, palmDis, vtouchHand_last[handInd].frameId,
 				vtouchHand_last[handInd].palmDepth, foreground.at<float>(curtHand.palmCenter),
 				vtouchHand_last[handInd].touchPoints.size(), curtHand.touchPoints.size());
@@ -960,7 +960,7 @@ void ProjectorCamera::findFinger()
 		for (int pointInd = 0; pointInd < corpHand.touchPoints.size(); pointInd++)
 		{
 			TouchPoint touchPoint = corpHand.touchPoints[pointInd];
-			touchPoint.tipPosition = touchPoint.palmToTip + Point2f(curtHand.palmCenter.x, curtHand.palmCenter.y);
+			touchPoint.tipPosition = touchPoint.palmToTip + cv::Point2f(curtHand.palmCenter.x, curtHand.palmCenter.y);
 			
 			//skip board point
 			if (touchPoint.tipPosition.y < 0 || touchPoint.tipPosition.y > depthImg.rows - 1 ||
@@ -975,7 +975,7 @@ void ProjectorCamera::findFinger()
 			touchPoint.bottomDepth    = depthImg.at<float>(curtHand.palmCenter);
 			touchPoint.getAngle();
 			touchPoint.getOrien();
-			touchPoint.palmToTip = touchPoint.tipPosition - Point2f(curtHand.palmCenter.x, curtHand.palmCenter.y);
+			touchPoint.palmToTip = touchPoint.tipPosition - cv::Point2f(curtHand.palmCenter.x, curtHand.palmCenter.y);
 			touchPoint.frameId   = frameId;
 			touchPoint.isReal    = false;
 			//touchPoint.tipInPro = calibDepToPro(touchPoint.tipPosition, touchPoint.tipDepth);
@@ -1075,7 +1075,7 @@ void ProjectorCamera::findInAirObject()
         {
             stereoProjectHover.cameraVertex.clear();
             stereoProjectHover.vertexDepth.clear();
-		    stereoProjectHover.cameraVertex.push_back(Point2f(stereoProjectHover.curtHands[0].palmCenter.x,
+		    stereoProjectHover.cameraVertex.push_back(cv::Point2f(stereoProjectHover.curtHands[0].palmCenter.x,
 		    stereoProjectHover.curtHands[0].palmCenter.y));
 		    stereoProjectHover.vertexDepth.push_back(depthImg.at<float>(stereoProjectHover.curtHands[0].palmCenter));
 
@@ -1085,15 +1085,15 @@ void ProjectorCamera::findInAirObject()
 
     	struct PointCmp
     	{
-    		PointCmp(Point3f ct) : center(ct){};
-    		Point3f center;
-    		bool operator () (Point3f& a, Point3f& b)
+    		PointCmp(cv::Point3f ct) : center(ct){};
+    		cv::Point3f center;
+    		bool operator () (cv::Point3f& a, cv::Point3f& b)
     		{
     			return (norm(a - center)<norm(b - center));
     		}
     	};
 
-    	vector<Point3f> deskPts(stereoProjectDesk.proVertex3D);
+    	vector<cv::Point3f> deskPts(stereoProjectDesk.proVertex3D);
     	sort(deskPts.begin(),deskPts.end(),PointCmp(stereoProjectHover.proVertex3D[0]));
 
         stereoProjectHover.proVertex3D.push_back(stereoProjectHover.proVertex3D[0]);
@@ -1122,44 +1122,102 @@ void ProjectorCamera::findOnDeskObject()
 
 		//contour to 
 		TouchHand temHand;
-		Mat contourMat = Mat(objects[ind].contour);
-		approxPolyDP(contourMat, temHand.approxCurve, 15, true);
+		cv::Mat contourMat = cv::Mat(objects[ind].contour);
+		cv::approxPolyDP(contourMat, temHand.approxCurve, 15, true);
 		if (temHand.approxCurve.size() != 4) continue;
 
 		bool boatDemo = false;
-		if (temHand.approxCurve.size() == 4)
-		{
-			Scalar center = mean(Mat(temHand.approxCurve));
-			Point centerPoint = Point(center.val[0], center.val[1]);
-			float centerDepth = foreground.at<float>(centerPoint.y, centerPoint.x);
-			if (centerDepth < 15) boatDemo = true;
-			if (centerDepth > 100) continue;
-			//is a rectangle
-			if (abs(norm(temHand.approxCurve[0] - temHand.approxCurve[1])
-				- norm(temHand.approxCurve[2] - temHand.approxCurve[3])) > 50 ||
-				abs(norm(temHand.approxCurve[2] - temHand.approxCurve[1])
-				- norm(temHand.approxCurve[0] - temHand.approxCurve[3])) > 50)
+		if (temHand.approxCurve.size() != 4) continue;
+
+		cv::Scalar center = mean(cv::Mat(temHand.approxCurve));
+		cv::Point centerPoint = cv::Point(center.val[0], center.val[1]);
+		float centerDepth = foreground.at<float>(centerPoint.y, centerPoint.x);
+		if (centerDepth < 15) boatDemo = true;
+		if (centerDepth > 100) continue;
+		//is a rectangle
+		if (abs(norm(temHand.approxCurve[0] - temHand.approxCurve[1])
+			- norm(temHand.approxCurve[2] - temHand.approxCurve[3])) > 50 ||
+			abs(norm(temHand.approxCurve[2] - temHand.approxCurve[1])
+			- norm(temHand.approxCurve[0] - temHand.approxCurve[3])) > 50)
 				continue;
-		}
-		else
-		{
-			continue;
-		}
 
 		//get four verticals 
-		RotatedRect rorec = minAreaRect(objects[ind].contour);
-		Point2f ppt[4];
+		cv::RotatedRect rorec = minAreaRect(objects[ind].contour);
+		cv::Point2f ppt[4];
 		rorec.points(ppt);
-		vector<Point2f> vpoints(ppt, ppt + 4),vpoints2(4);
+		vector<cv::Point2f> vpoints(ppt, ppt + 4),vpoints2(4);
+
+		vpoints[0] = temHand.approxCurve[0];
+		vpoints[1] = temHand.approxCurve[1];
+		vpoints[2] = temHand.approxCurve[2];
+		vpoints[3] = temHand.approxCurve[3];
+		clockwiseContour(vpoints);
+		vpoints.push_back(centerPoint);
+
+		pcl::PointCloud<pcl::PointXYZ>::Ptr target(new pcl::PointCloud<pcl::PointXYZ>);
+		pcl::PointCloud<pcl::PointXYZ>::Ptr source(new pcl::PointCloud<pcl::PointXYZ>);
+		pcl::PointCloud<pcl::PointXYZ>::Ptr result(new pcl::PointCloud<pcl::PointXYZ>);
+
+		if (pcl::io::loadPCDFile<pcl::PointXYZ>("five.pcd", *target) == -1)//打开点云文件
+		{
+			PCL_ERROR("Couldn't read file target.pcd\n");
+			return;
+		}
+
+		source->width = target->points.size();
+		source->height = 1;
+		source->is_dense = false;
+		source->points.resize(source->width * source->height);
+		vector<float> corner_depth;   //角点与中点的深度值
+		vector<cv::Point3f> corner_pro;
+		for (size_t i = 0; i < vpoints.size(); ++i)
+			corner_depth.push_back(depthImg.at<float>(vpoints[i].y, vpoints[i].x));
+		calibDepToPro(vpoints, corner_depth, corner_pro); //检测出的四个角点与中点在投影仪坐标系下的坐标
+
+		for (size_t i = 0; i < source->points.size(); ++i)
+		{
+			source->points[i].x = corner_pro[i].x;
+			source->points[i].y = corner_pro[i].y;
+			source->points[i].z = corner_pro[i].z;
+		}
+
+		size_t iterations = 200;
+		//pcl::GeneralizedIterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+		pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+		icp.setEuclideanFitnessEpsilon(1e-8);
+		//icp.setTransformationEpsilon(1e-6);
+		//icp.setMaximumIterations(iterations);
+		icp.setInputSource(source);
+		icp.setInputTarget(target);
+		icp.align(*result);
+		Eigen::Matrix4f transformation = icp.getFinalTransformation(); // Obtain the transformation that aligned source to target
+
+		Eigen::Matrix<double, 3, 3> RR;
+		Eigen::Matrix<double, 3, 3> R_inv;
+		Eigen::Matrix<double, 3, 1> TT;
+		RR << transformation(0, 0), transformation(0, 1), transformation(0, 2),
+			  transformation(1, 0), transformation(1, 1), transformation(1, 2),
+			  transformation(2, 0), transformation(2, 1), transformation(2, 2);
+		R_inv = RR.inverse();
+		TT << transformation(0, 3), transformation(1, 3), transformation(2, 3);
+		Eigen::Matrix<double, 3, 5> Corner;
+		Eigen::Matrix<double, 3, 1> Point;
+		for (size_t ii = 0; ii < target->points.size(); ++ii)
+		{
+			Point << target->points[ii].x, target->points[ii].y, target->points[ii].z;
+			Corner.col(ii) = R_inv * (Point - TT);  //模板点在投影仪坐标系下的坐标
+		}
+		cout << Corner << endl;
+		return;
 
         for(int dex=0;dex<vpoints.size();dex++)
         {
-            Point2f& point1 = vpoints[dex];
+            cv::Point2f& point1 = vpoints[dex];
             for(auto point2:temHand.approxCurve)
             {
-                if(norm(point1 - Point2f(point2.x, point2.y)) < 20)
+                if(norm(point1 - cv::Point2f(point2.x, point2.y)) < 20)
                 {
-                    point1 = (point1 + Point2f(point2.x, point2.y)) * 0.5;
+                    point1 = (point1 + cv::Point2f(point2.x, point2.y)) * 0.5;
                     break;
                 }
             }
@@ -1169,7 +1227,7 @@ void ProjectorCamera::findOnDeskObject()
 
 		//get depth
 		StereoProjection stereoProjectOld = stereoProjectDesk;
-		vector<Point2f> lastVertex = stereoProjectDesk.cameraVertex;
+		vector<cv::Point2f> lastVertex = stereoProjectDesk.cameraVertex;
 		vector<float>   lastDepth = stereoProjectDesk.vertexDepth;
 		stereoProjectDesk.cameraVertex.clear();
 		stereoProjectDesk.vertexDepth.clear();
@@ -1177,7 +1235,7 @@ void ProjectorCamera::findOnDeskObject()
 		int corresNum = 0;
 		for (int jnd = 0; jnd<vpoints.size(); jnd++)
 		{
-			Point2f& point = vpoints[jnd];
+			cv::Point2f& point = vpoints[jnd];
 			if (point.x<0 || point.x>depthImg.cols - 2 ||
 				point.y<0 || point.y>depthImg.rows - 2)
 				return;
@@ -1216,7 +1274,7 @@ void ProjectorCamera::findOnDeskObject()
 		//keep stable
 		if (corresNum != 4) 
 		{
-			vector<Point3f> lastVertex3D = stereoProjectDesk.proVertex3D;
+			vector<cv::Point3f> lastVertex3D = stereoProjectDesk.proVertex3D;
 			stereoProjectDesk.proVertex3D.clear();
 			stereoProjectDesk.cameraVertex = vpoints;
 			
@@ -1226,7 +1284,7 @@ void ProjectorCamera::findOnDeskObject()
 
 			for (int ind = 0; ind<stereoProjectDesk.proVertex3D.size(); ind++)
 			{
-				Point3f& point = stereoProjectDesk.proVertex3D[ind];
+				cv::Point3f& point = stereoProjectDesk.proVertex3D[ind];
 				for (int subind = 0; subind<lastVertex3D.size(); subind++)
 				{
 					float dis = norm(lastVertex3D[subind] -  point);
@@ -1265,15 +1323,15 @@ void ProjectorCamera::findOnDeskObject()
 @param
 @result
 */
-void ProjectorCamera::clockwiseContour(vector<Point2f>& verticals)
+void ProjectorCamera::clockwiseContour(vector<cv::Point2f>& verticals)
 {
     if(verticals.size()<3) return;
 
-    Mat allPoints(verticals);
-    Scalar center = mean(verticals);
-    Point2f O(center.val[0], center.val[1]);
-    Point2f a = verticals[0] - O;//o->a
-    Point2f b = verticals[1] - O;//o->a
+    cv::Mat allPoints(verticals);
+    cv::Scalar center = cv::mean(verticals);
+    cv::Point2f O(center.val[0], center.val[1]);
+    cv::Point2f a = verticals[0] - O;//o->a
+    cv::Point2f b = verticals[1] - O;//o->a
 
 	//use vector cross product to jugdy clockwise orientation
     float hint = a.x*b.y - b.x*a.y;
@@ -1288,17 +1346,17 @@ void ProjectorCamera::clockwiseContour(vector<Point2f>& verticals)
 @param
 @result
 */
-void ProjectorCamera::clockwiseContour(vector<Point>& verticals)
+void ProjectorCamera::clockwiseContour(vector<cv::Point>& verticals)
 {
     if(verticals.size()<3) return;
 
-    Mat allPoints(verticals);
-    Scalar center = mean(verticals);
-    Point2f O(center.val[0], center.val[1]);
-    Point2f x1(verticals[0].x, verticals[0].y);
-    Point2f x2(verticals[1].x, verticals[1].y);
-    Point2f a = x1 - O;//o->a
-    Point2f b = x2 - O;//o->a
+    cv::Mat allPoints(verticals);
+    cv::Scalar center = cv::mean(verticals);
+    cv::Point2f O(center.val[0], center.val[1]);
+    cv::Point2f x1(verticals[0].x, verticals[0].y);
+    cv::Point2f x2(verticals[1].x, verticals[1].y);
+    cv::Point2f a = x1 - O;//o->a
+    cv::Point2f b = x2 - O;//o->a
 
     float hint = a.x*b.y - b.x*a.y;
 
@@ -1312,7 +1370,7 @@ void ProjectorCamera::clockwiseContour(vector<Point>& verticals)
 @param
 @result
 */
-void ProjectorCamera::refineVerticals(vector<Point3f>& verticals)
+void ProjectorCamera::refineVerticals(vector<cv::Point3f>& verticals)
 {
     if(verticals.size() != 4) return;
 
@@ -1326,7 +1384,7 @@ void ProjectorCamera::refineVerticals(vector<Point3f>& verticals)
         double bias = (detectDiagonal - realDiagonal) / 2;
 
 		//unitVector of diagonal
-        Point3f unitVector = verticals[ind+2] - verticals[ind];
+        cv::Point3f unitVector = verticals[ind+2] - verticals[ind];
         double L = sqrt(unitVector.x * unitVector.x + unitVector.y * unitVector.y + unitVector.z * unitVector.z);
         unitVector.x = unitVector.x / L;
         unitVector.y = unitVector.y / L;
@@ -1347,25 +1405,25 @@ void ProjectorCamera::refineVerticals(vector<Point3f>& verticals)
 @param
 @result
 */
-void ProjectorCamera::calibDepToPro(vector<Point2f>& vp_cam, vector<float>& v_depth,vector<Point3f>& vp_pro)
+void ProjectorCamera::calibDepToPro(vector<cv::Point2f>& vp_cam, vector<float>& v_depth,vector<cv::Point3f>& vp_pro)
 {
     //add rectangle bias, get point in src depth image
-    vector<Point2f>  projection = vp_cam;
+    vector<cv::Point2f>  projection = vp_cam;
     for(int ind=0;ind<vp_cam.size();ind++)
     {
-        projection[ind] += Point2f(screenRoi.x,screenRoi.y);
+        projection[ind] += cv::Point2f(screenRoi.x,screenRoi.y);
     }
 
 	//undistored points in image
-    vector<Point2f> point_in_camera_undised;
-	undistortPoints(projection, point_in_camera_undised, depth_KK, depth_dis, Mat::eye(3, 3, CV_64F), depth_KK);
+    vector<cv::Point2f> point_in_camera_undised;
+	cv::undistortPoints(projection, point_in_camera_undised, depth_KK, depth_dis, cv::Mat::eye(3, 3, CV_64F), depth_KK);
 
 	//image plane-> camera axis->projector axis
     vp_pro.clear();
     for(int ind=0;ind<point_in_camera_undised.size();ind++)
     {
         //depth image plane->depth camera axis
-        Point2f temPoint = point_in_camera_undised[ind];
+        cv::Point2f temPoint = point_in_camera_undised[ind];
         double cx = depth_KK.at<double>(0,2);
         double cy = depth_KK.at<double>(1,2);
         double fx = depth_KK.at<double>(0,0);
@@ -1376,11 +1434,11 @@ void ProjectorCamera::calibDepToPro(vector<Point2f>& vp_cam, vector<float>& v_de
         //LOGD("stereo projection in the air proAxis,Xc%f Yc%f Zc%f", Xc,Yc,Zc);
 
         //depth axis->color camera axis
-        Point3d depAxis(Xc,Yc,Zc);
-        Mat camAxis = depToColR * Mat(depAxis) + depToColT;
+        cv::Point3d depAxis(Xc,Yc,Zc);
+        cv::Mat camAxis = depToColR * cv::Mat(depAxis) + depToColT;
 
         //camera axis->projector axis
-        Mat out = colToProR * camAxis + colToProT;
+        cv::Mat out = colToProR * camAxis + colToProT;
 
 		//add distortion
 		//vector<cv::Point2f> v_imagePoints2d;
@@ -1388,7 +1446,7 @@ void ProjectorCamera::calibDepToPro(vector<Point2f>& vp_cam, vector<float>& v_de
 		//v_worldPoints3d.push_back(Point3f(camAxis));
 		//projectPoints(Mat(v_worldPoints3d), colToProR, colToProT, project_KK, project_dis, v_imagePoints2d);
 
-        Point3f proAxis;
+        cv::Point3f proAxis;
         double pfx = project_KK.at<double>(0,0);
         double pfy = project_KK.at<double>(1,1);
         double pcx = project_KK.at<double>(0,2);
@@ -1410,20 +1468,20 @@ void ProjectorCamera::calibDepToPro(vector<Point2f>& vp_cam, vector<float>& v_de
 @param
 @result
 */
-Point2f ProjectorCamera::calibDepToPro(Point2f p_cam, float depth)
+cv::Point2f ProjectorCamera::calibDepToPro(cv::Point2f p_cam, float depth)
 {
 	//add rectangle bias, get point in src depth image
-    vector<Point2f> vp_cam,point_in_camera_undised;
-    p_cam = p_cam + Point2f(screenRoi.x,screenRoi.y);
+    vector<cv::Point2f> vp_cam,point_in_camera_undised;
+    p_cam = p_cam + cv::Point2f(screenRoi.x,screenRoi.y);
     vp_cam.push_back(p_cam);
 
 	//undistored points in image
-	undistortPoints(vp_cam, point_in_camera_undised, depth_KK, depth_dis, Mat::eye(3, 3, CV_64F), depth_KK);
+	cv::undistortPoints(vp_cam, point_in_camera_undised, depth_KK, depth_dis, cv::Mat::eye(3, 3, CV_64F), depth_KK);
 
     for(int ind=0;ind<point_in_camera_undised.size();ind++)
     {
         //depth image plane-> depth camera axis
-        Point2f temPoint = point_in_camera_undised[ind];
+        cv::Point2f temPoint = point_in_camera_undised[ind];
         double cx = depth_KK.at<double>(0,2);
         double cy = depth_KK.at<double>(1,2);
         double fx = depth_KK.at<double>(0,0);
@@ -1433,11 +1491,11 @@ Point2f ProjectorCamera::calibDepToPro(Point2f p_cam, float depth)
 		double Yc = Zc * (temPoint.y  - cy) / fy;
 
         //depth axis->color camera axis
-        Point3d depAxis(Xc,Yc,Zc);
-        Mat camAxis = depToColR * Mat(depAxis) + depToColT;
+        cv::Point3d depAxis(Xc,Yc,Zc);
+        cv::Mat camAxis = depToColR * cv::Mat(depAxis) + depToColT;
 
         //camera axis->projector axis
-        Point3f camAxisPoint;
+        cv::Point3f camAxisPoint;
         camAxisPoint.x = camAxis.at<double>(0,0);
         camAxisPoint.y = camAxis.at<double>(1,0);
         camAxisPoint.z = camAxis.at<double>(2,0);
@@ -1452,7 +1510,7 @@ Point2f ProjectorCamera::calibDepToPro(Point2f p_cam, float depth)
 		//flip
 		imagePoints2[0].x = 1280 - imagePoints2[0].x;
 		imagePoints2[0].y = 720  - imagePoints2[0].y;
-		return imagePoints2[0] - Point2f(offset_x, offset_y) - Point2f(offset_init_x, offset_init_y);
+		return imagePoints2[0] - cv::Point2f(offset_x, offset_y) - cv::Point2f(offset_init_x, offset_init_y);
     }
 }
 
@@ -1463,24 +1521,24 @@ Point2f ProjectorCamera::calibDepToPro(Point2f p_cam, float depth)
 @param
 @result
 */
-void ProjectorCamera::calibDepToPro(vector<Point2f>& vp_cam, vector<float>& v_depth,vector<Point2f>& vp_pro)
+void ProjectorCamera::calibDepToPro(vector<cv::Point2f>& vp_cam, vector<float>& v_depth,vector<cv::Point2f>& vp_pro)
 {    
 	//add rectangle bias, get point in src depth image
     for(int ind=0;ind<vp_cam.size();ind++)
     {
-        vp_cam[ind] += Point2f(screenRoi.x,screenRoi.y);
+        vp_cam[ind] += cv::Point2f(screenRoi.x,screenRoi.y);
     }
 
 	//undistored points in image
-    vector<Point2f> point_in_camera_undised;
-	undistortPoints(vp_cam, point_in_camera_undised, depth_KK, depth_dis, Mat::eye(3, 3, CV_64F), depth_KK);
+    vector<cv::Point2f> point_in_camera_undised;
+	cv::undistortPoints(vp_cam, point_in_camera_undised, depth_KK, depth_dis, cv::Mat::eye(3, 3, CV_64F), depth_KK);
    
 	//image plane-> camera axis->projector axis
     vp_pro.clear();
     for(int ind=0;ind<point_in_camera_undised.size();ind++)
     {
         //image plane-> camera axis
-        Point2f temPoint = point_in_camera_undised[ind];
+        cv::Point2f temPoint = point_in_camera_undised[ind];
         double cx = depth_KK.at<double>(0,2);
         double cy = depth_KK.at<double>(1,2);
         double fx = depth_KK.at<double>(0,0);
@@ -1490,11 +1548,11 @@ void ProjectorCamera::calibDepToPro(vector<Point2f>& vp_cam, vector<float>& v_de
 		double Yc = Zc * (temPoint.y  - cy) / fy;    
 
         //depth axis->color camera axis
-        Point3d depAxis(Xc,Yc,Zc);
-        Mat camAxis = depToColR * Mat(depAxis) + depToColT; 
+        cv::Point3d depAxis(Xc,Yc,Zc);
+        cv::Mat camAxis = depToColR * cv::Mat(depAxis) + depToColT; 
 
         //camera axis->projector axis
-        Point3f camAxisPoint;
+        cv::Point3f camAxisPoint;
         camAxisPoint.x = camAxis.at<double>(0,0);
         camAxisPoint.y = camAxis.at<double>(1,0);
         camAxisPoint.z = camAxis.at<double>(2,0);
@@ -1509,7 +1567,7 @@ void ProjectorCamera::calibDepToPro(vector<Point2f>& vp_cam, vector<float>& v_de
 		//flip
 		imagePoints2[0].x = 1280 - imagePoints2[0].x;
 		imagePoints2[0].y = 720 - imagePoints2[0].y;
-		vp_pro.push_back(imagePoints2[0] - Point2f(offset_x, offset_y) - Point2f(offset_init_x, offset_init_y));
+		vp_pro.push_back(imagePoints2[0] - cv::Point2f(offset_x, offset_y) - cv::Point2f(offset_init_x, offset_init_y));
     }
 }
 
@@ -1520,25 +1578,25 @@ void ProjectorCamera::calibDepToPro(vector<Point2f>& vp_cam, vector<float>& v_de
 @param
 @result
 */
-void ProjectorCamera::calibCamToPro(vector<Point2f>& vp_cam, vector<float>& v_depth, vector<Point3f>& vp_pro)
+void ProjectorCamera::calibCamToPro(vector<cv::Point2f>& vp_cam, vector<float>& v_depth, vector<cv::Point3f>& vp_pro)
 {
 	//add rectangle bias, get point in src depth image
-	vector<Point2f>  projection = vp_cam;
+	vector<cv::Point2f>  projection = vp_cam;
 	for (int ind = 0; ind<vp_cam.size(); ind++)
 	{
-		projection[ind] += Point2f(screenRoi.x, screenRoi.y);
+		projection[ind] += cv::Point2f(screenRoi.x, screenRoi.y);
 	}
 
 	//undistored points in image
-	vector<Point2f> point_in_camera_undised;
-	undistortPoints(projection, point_in_camera_undised, camera_KK, camera_dis, Mat::eye(3, 3, CV_64F), camera_KK);
+	vector<cv::Point2f> point_in_camera_undised;
+	cv::undistortPoints(projection, point_in_camera_undised, camera_KK, camera_dis, cv::Mat::eye(3, 3, CV_64F), camera_KK);
 
 	//image plane-> camera axis->projector axis
 	vp_pro.clear();
 	for (int ind = 0; ind<point_in_camera_undised.size(); ind++)
 	{
 		//depth image plane->depth camera axis
-		Point2f temPoint = point_in_camera_undised[ind];
+		cv::Point2f temPoint = point_in_camera_undised[ind];
 		double cx = camera_KK.at<double>(0, 2);
 		double cy = camera_KK.at<double>(1, 2);
 		double fx = camera_KK.at<double>(0, 0);
@@ -1549,10 +1607,10 @@ void ProjectorCamera::calibCamToPro(vector<Point2f>& vp_cam, vector<float>& v_de
 		//LOGD("stereo projection in the air proAxis,Xc%f Yc%f Zc%f", Xc,Yc,Zc);
 
 		//depth axis->color camera axis
-		Point3d camAxis(Xc, Yc, Zc);		
+		cv::Point3d camAxis(Xc, Yc, Zc);		
 
 		//camera axis->projector axis
-		Mat out = colToProR * Mat(camAxis) + colToProT;
+		cv::Mat out = colToProR * cv::Mat(camAxis) + colToProT;
 
 		//add distortion
 		//vector<cv::Point2f> v_imagePoints2d;
@@ -1560,7 +1618,7 @@ void ProjectorCamera::calibCamToPro(vector<Point2f>& vp_cam, vector<float>& v_de
 		//v_worldPoints3d.push_back(Point3f(camAxis));
 		//projectPoints(Mat(v_worldPoints3d), colToProR, colToProT, project_KK, project_dis, v_imagePoints2d);
 
-		Point3f proAxis;
+		cv::Point3f proAxis;
 		double pfx = project_KK.at<double>(0, 0);
 		double pfy = project_KK.at<double>(1, 1);
 		double pcx = project_KK.at<double>(0, 2);
@@ -1582,20 +1640,20 @@ void ProjectorCamera::calibCamToPro(vector<Point2f>& vp_cam, vector<float>& v_de
 @param
 @result
 */
-Point2f ProjectorCamera::calibCamToPro(Point2f p_cam, float depth)
+cv::Point2f ProjectorCamera::calibCamToPro(cv::Point2f p_cam, float depth)
 {
 	//add rectangle bias, get point in src depth image
-	vector<Point2f> vp_cam, point_in_camera_undised;
-	p_cam = p_cam + Point2f(screenRoi.x, screenRoi.y);
+	vector<cv::Point2f> vp_cam, point_in_camera_undised;
+	p_cam = p_cam + cv::Point2f(screenRoi.x, screenRoi.y);
 	vp_cam.push_back(p_cam);
 
 	//undistored points in image
-	undistortPoints(vp_cam, point_in_camera_undised, camera_KK, camera_dis, Mat::eye(3, 3, CV_64F), camera_KK);
+	cv::undistortPoints(vp_cam, point_in_camera_undised, camera_KK, camera_dis, cv::Mat::eye(3, 3, CV_64F), camera_KK);
 
 	for (int ind = 0; ind<point_in_camera_undised.size(); ind++)
 	{
 		//depth image plane-> depth camera axis
-		Point2f temPoint = point_in_camera_undised[ind];
+		cv::Point2f temPoint = point_in_camera_undised[ind];
 		double cx = camera_KK.at<double>(0, 2);
 		double cy = camera_KK.at<double>(1, 2);
 		double fx = camera_KK.at<double>(0, 0);
@@ -1605,7 +1663,7 @@ Point2f ProjectorCamera::calibCamToPro(Point2f p_cam, float depth)
 		double Yc = Zc * (temPoint.y - cy) / fy;
 
 		//camera axis->projector axis
-		Point3f camAxisPoint;
+		cv::Point3f camAxisPoint;
 		camAxisPoint.x = Xc;
 		camAxisPoint.y = Yc;
 		camAxisPoint.z = Zc;
@@ -1631,24 +1689,24 @@ Point2f ProjectorCamera::calibCamToPro(Point2f p_cam, float depth)
 @param
 @result
 */
-void ProjectorCamera::calibCamToPro(vector<Point2f>& vp_cam, vector<float>& v_depth, vector<Point2f>& vp_pro)
+void ProjectorCamera::calibCamToPro(vector<cv::Point2f>& vp_cam, vector<float>& v_depth, vector<cv::Point2f>& vp_pro)
 {
 	//add rectangle bias, get point in src depth image
 	for (int ind = 0; ind<vp_cam.size(); ind++)
 	{
-		vp_cam[ind] += Point2f(screenRoi.x, screenRoi.y);
+		vp_cam[ind] += cv::Point2f(screenRoi.x, screenRoi.y);
 	}
 
 	//undistored points in image
-	vector<Point2f> point_in_camera_undised;
-	undistortPoints(vp_cam, point_in_camera_undised, camera_KK, camera_dis, Mat::eye(3, 3, CV_64F), camera_KK);
+	vector<cv::Point2f> point_in_camera_undised;
+	cv::undistortPoints(vp_cam, point_in_camera_undised, camera_KK, camera_dis, cv::Mat::eye(3, 3, CV_64F), camera_KK);
 
 	//image plane-> camera axis->projector axis
 	vp_pro.clear();
 	for (int ind = 0; ind<point_in_camera_undised.size(); ind++)
 	{
 		//image plane-> camera axis
-		Point2f temPoint = point_in_camera_undised[ind];
+		cv::Point2f temPoint = point_in_camera_undised[ind];
 		double cx = camera_KK.at<double>(0, 2);
 		double cy = camera_KK.at<double>(1, 2);
 		double fx = camera_KK.at<double>(0, 0);
@@ -1658,7 +1716,7 @@ void ProjectorCamera::calibCamToPro(vector<Point2f>& vp_cam, vector<float>& v_de
 		double Yc = Zc * (temPoint.y - cy) / fy;
 
 		//camera axis->projector axis
-		Point3f camAxisPoint;
+		cv::Point3f camAxisPoint;
 		camAxisPoint.x = Xc;
 		camAxisPoint.y = Yc;
 		camAxisPoint.z = Zc;
@@ -1685,23 +1743,23 @@ void ProjectorCamera::calibCamToPro(vector<Point2f>& vp_cam, vector<float>& v_de
 @result
 */
 
-Point2f ProjectorCamera::homogCamToPro(Point2f camPoint)
+cv::Point2f ProjectorCamera::homogCamToPro(cv::Point2f camPoint)
 {
-	Point2f proPoint;
-	vector<Point2f> v_camPoints, v_proPoints;
-	v_camPoints.push_back(camPoint + Point2f(screenRoi.x, screenRoi.y));
+	cv::Point2f proPoint;
+	vector<cv::Point2f> v_camPoints, v_proPoints;
+	v_camPoints.push_back(camPoint + cv::Point2f(screenRoi.x, screenRoi.y));
 
 	//different start point
-	if (!setViewDepth)
+	if(!setViewDepth)
 		perspectiveTransform(v_camPoints, v_proPoints, homo);
 	else
 		perspectiveTransform(v_camPoints, v_proPoints, depToProHomo);
 
 	//flip
-	proPoint = Point2f(1280, 720) - v_proPoints[0];
+	proPoint = cv::Point2f(1280, 720) - v_proPoints[0];
 
 	//offset
-	proPoint = proPoint - Point2f(offset_x,offset_y) - Point2f(offset_init_x,offset_init_y);
+	proPoint = proPoint - cv::Point2f(offset_x,offset_y) - cv::Point2f(offset_init_x,offset_init_y);
 	return proPoint;
 }
 
@@ -1744,14 +1802,14 @@ float  ProjectorCamera::caclAngle(TouchHand& curtHand, int ind)
 	}
 
 	//get point
-	Point left(curtHand.approxCurve[leftind]);
-	Point center(curtHand.approxCurve[index]);
-	Point right(curtHand.approxCurve[rightind]);
+	cv::Point left(curtHand.approxCurve[leftind]);
+	cv::Point center(curtHand.approxCurve[index]);
+	cv::Point right(curtHand.approxCurve[rightind]);
 
 	//get orientation
 	float angle(0);
-	Point lc = left  - center;
-	Point rc = right - center;	
+	cv::Point lc = left  - center;
+	cv::Point rc = right - center;	
 
 	//get angle
 	float cos_angle = (lc.x * rc.x + lc.y*rc.y) / (norm(lc) * norm(rc));
@@ -1765,11 +1823,11 @@ float  ProjectorCamera::caclAngle(TouchHand& curtHand, int ind)
 *function: calculate angle constructed by three points
 *note    :
 */
-float  ProjectorCamera::caclAngleForInAirGesture(Point& left, Point& center, Point& right)
+float  ProjectorCamera::caclAngleForInAirGesture(cv::Point& left, cv::Point& center, cv::Point& right)
 {
 	float angle(0);
-	Point lc = left - center;
-	Point rc = right - center;
+	cv::Point lc = left - center;
+	cv::Point rc = right - center;
 
 	float cos_angle = (lc.x * rc.x + lc.y*rc.y) / (sqrtf(lc.x*lc.x + lc.y*lc.y) * sqrtf(rc.x*rc.x + rc.y *rc.y));
 
@@ -1786,23 +1844,23 @@ float  ProjectorCamera::caclAngleForInAirGesture(Point& left, Point& center, Poi
 @param
 @result
 */
-Point2f ProjectorCamera::fingerDirection(Point2f L, Point2f M, Point2f R)
+cv::Point2f ProjectorCamera::fingerDirection(cv::Point2f L, cv::Point2f M, cv::Point2f R)
 {
 	//make sure L nearer than R
 	if (norm(L - M) > norm(R - M))
 	{
-		Point2f tem = L;
+		cv::Point2f tem = L;
 		L = R;
 		R = tem;
 	}
 
 	//calculate the L pojection point in MR
 	float dis = norm(L - M);
-	Point2f Fdirection = R - M;
+	cv::Point2f Fdirection = R - M;
 	float normtem = norm(Fdirection);
 	Fdirection.x /= normtem;
 	Fdirection.y /= normtem;
-	Point2f O = M + dis * Fdirection;
+	cv::Point2f O = M + dis * Fdirection;
 	O = (O + L)*0.5;
 
 	return O;
@@ -1815,7 +1873,7 @@ Point2f ProjectorCamera::fingerDirection(Point2f L, Point2f M, Point2f R)
 @param
 @result
 */
-void ProjectorCamera::refineRect(Rect& rec, Mat image)
+void ProjectorCamera::refineRect(cv::Rect& rec, cv::Mat image)
 {
 	//min value
 	if (rec.x < 0) rec.x = 0;
@@ -1833,7 +1891,7 @@ void ProjectorCamera::refineRect(Rect& rec, Mat image)
 @param
 @result
 */
-void ProjectorCamera::fillDepthImageHole(Mat& object)
+void ProjectorCamera::fillDepthImageHole(cv::Mat& object)
 {
 	//every row
 	for (int row = 0; row < object.rows; row++)
@@ -1875,10 +1933,10 @@ void ProjectorCamera::fillDepthImageHole(Mat& object)
 @param
 @result
 */
-float ProjectorCamera::contourAverageDepth(vector<Point>& contour)
+float ProjectorCamera::contourAverageDepth(vector<cv::Point>& contour)
 {
 	//paras
-	Rect contRect = boundingRect(contour);
+	cv::Rect contRect = cv::boundingRect(contour);
 	int pointCount(0);
 	float depthSum(0);
 
@@ -1888,7 +1946,7 @@ float ProjectorCamera::contourAverageDepth(vector<Point>& contour)
 		for (int col = contRect.x; col < contRect.x + contRect.width; col++)
 		{
 			//test if point is valid
-			if (pointPolygonTest(contour, Point(col, row), 1) >= 0 &&
+			if (pointPolygonTest(contour, cv::Point(col, row), 1) >= 0 &&
 				foreground.at<float>(row, col) > 0)
 			{
 				pointCount++;
@@ -1908,12 +1966,12 @@ float ProjectorCamera::contourAverageDepth(vector<Point>& contour)
 @param
 @result
 */
-void ProjectorCamera::convertFloatToChar(Mat& src, Mat& dst)
+void ProjectorCamera::convertFloatToChar(cv::Mat& src, cv::Mat& dst)
 {
 	//make sure src not empty
 	if (src.empty()) return;
 
-	dst = Mat(src.rows, src.cols, CV_8UC1, Scalar(0));
+	dst = cv::Mat(src.rows, src.cols, CV_8UC1, cv::Scalar(0));
 
     //LOGD("Time src.isContinuous %d && dst.isContinuous %d",src.isContinuous(),dst.isContinuous());
 	//if src and dst mat data is continue in memory
@@ -1956,7 +2014,7 @@ void ProjectorCamera::findInAirGesture(){
 		return;
 
 	//将前景转化为3通道,方便显示
-	vector<Mat> foregrounds;
+	vector<cv::Mat> foregrounds;
 	for (int i = 0; i < 3; i++)
 		foregrounds.push_back(foreground);
 	cv::merge(foregrounds, foreground_copy);
@@ -1965,33 +2023,34 @@ void ProjectorCamera::findInAirGesture(){
 		//min object area
 		int cArea = objects[i].cArea;
 		if (cArea < 3000 || cArea > 40000) continue;
-		Mat contourMat = Mat(objects[i].contour);
+		cv::Mat contourMat = cv::Mat(objects[i].contour);
 
-		vector<Point> approxCurve;
+		vector<cv::Point> approxCurve;
 		//get DP points of the object
-		approxPolyDP(contourMat, approxCurve, 10, true);
+		cv::approxPolyDP(contourMat, approxCurve, 10, true);
 
-		vector< vector<Point> > debugContourV;
+		vector< vector<cv::Point> > debugContourV;
 		debugContourV.push_back(approxCurve);
 
 		//get convex hull
 		vector<int> hull;
-		convexHull(Mat(approxCurve), hull, false, false);
+		convexHull(cv::Mat(approxCurve), hull, false, false);
 		//lixing's code--2-3ms的时间。
-		Mat disResult;
-		distanceTransform(binaryCopy, disResult, CV_DIST_L2, 3);
+		cv::Mat disResult;
+		cv::distanceTransform(binaryCopy, disResult, CV_DIST_L2, 3);
 		vector<int> new_counter_ind;
-		vector<Point> new_conter_pt(approxCurve);
+		vector<cv::Point> new_conter_pt(approxCurve);
 		double maxVal = 0.0;double minVal = 0.0;
-		Point maxLoc = Point(-1, -1);Point minLoc = Point(-1, -1);
+		cv::Point maxLoc = cv::Point(-1, -1);
+		cv::Point minLoc = cv::Point(-1, -1);
 		if (new_conter_pt.size() > 1)
 		{
-			Rect contRect = boundingRect(new_conter_pt);
+			cv::Rect contRect = cv::boundingRect(new_conter_pt);
 			int bound_height = 80;
-			Rect boundRect = Rect(contRect.x, contRect.y, contRect.width,( contRect.y + bound_height) > screenRoi.height ? screenRoi.height - contRect.y : bound_height);
+			cv::Rect boundRect = cv::Rect(contRect.x, contRect.y, contRect.width,( contRect.y + bound_height) > screenRoi.height ? screenRoi.height - contRect.y : bound_height);
 			//rectangle(foreground_copy, boundRect,COLOR_RED, 2);
 			for (int i = 0; i < new_conter_pt.size(); i++)
-				minMaxLoc(disResult(boundRect), &minVal, &maxVal, &minLoc, &maxLoc);
+				cv::minMaxLoc(disResult(boundRect), &minVal, &maxVal, &minLoc, &maxLoc);
 			maxLoc.x += boundRect.x;
 			maxLoc.y += boundRect.y;
 			//LOGD("frameId = %d,maxLoc.x = %d,maxLoc.y = %d,new_conter_pt.size() = %d,maxVal = %f",frameId,maxLoc.x,maxLoc.y,new_conter_pt.size(),maxVal);
@@ -2001,19 +2060,19 @@ void ProjectorCamera::findInAirGesture(){
 		vector<ConvexityDefect> convexDefects;
 		findConvexityDefects(approxCurve, hull, convexDefects);
 		// assemble point set of convex hull
-		vector<Point> hullPoints;
+		vector<cv::Point> hullPoints;
 		for (int k = 0; k < hull.size(); k++){
 			int curveIndex = hull[k];
-			Point p = approxCurve[curveIndex];
+			cv::Point p = approxCurve[curveIndex];
 			hullPoints.push_back(p);
 		}
 		// area of hull and curve
-		double hullArea = contourArea(Mat(hullPoints));//凸包点
-		double curveArea = contourArea(Mat(approxCurve));//凹包点+凸包点
+		double hullArea = contourArea(cv::Mat(hullPoints));//凸包点
+		double curveArea = contourArea(cv::Mat(approxCurve));//凹包点+凸包点
 		double handRatio = curveArea / hullArea;
 
 		//calculate the centers of the likely hand
-		Point center_point = Size(0, 0);
+		cv::Point center_point = cv::Size(0, 0);
 		center_point.x = maxLoc.x; center_point.y = maxLoc.y;
 
 		bool isInvalidPoint = center_point.x < 20 || center_point.y < 10 || center_point.x > foreground_copy.cols - 20 || center_point.y > foreground_copy.rows -  10||maxVal<=10||approxCurve.size()<4;
@@ -2097,7 +2156,7 @@ void ProjectorCamera::findInAirGesture(){
 	}
 }
 
-bool ProjectorCamera::isHandGraspOrOpen(double& handRatio, int& approxCurveSize, int& hullsize, int& littleangle, int& distance_x,int& distance_y,Point& centerpoint){
+bool ProjectorCamera::isHandGraspOrOpen(double& handRatio, int& approxCurveSize, int& hullsize, int& littleangle, int& distance_x,int& distance_y,cv::Point& centerpoint){
 	ncount_totalimg++;//hand grasp state
 	ncount_totalimg_open++;//hand open state
 	bool grapestate = GRASPFAITTURE;
@@ -2142,7 +2201,7 @@ bool ProjectorCamera::isHandGraspOrOpen(double& handRatio, int& approxCurveSize,
 	return openstate;
 }
 
-int ProjectorCamera::handWaveState(vector<Point>& pointsInLastFrames){
+int ProjectorCamera::handWaveState(vector<cv::Point>& pointsInLastFrames){
 
 	int frameNum = pointsInLastFrames.size();
 	if (frameNum != trajFrameNum)
@@ -2185,7 +2244,7 @@ int ProjectorCamera::handWaveState(vector<Point>& pointsInLastFrames){
 	return NOWAVE;
 }
 
-void ProjectorCamera::findConvexityDefects(vector<Point>& contour, vector<int>& hull, vector<ConvexityDefect>& convexDefects)
+void ProjectorCamera::findConvexityDefects(vector<cv::Point>& contour, vector<int>& hull, vector<ConvexityDefect>& convexDefects)
 {
 	if (hull.size() > 0 && contour.size() > 0)
 	{
@@ -2224,9 +2283,9 @@ void ProjectorCamera::findConvexityDefects(vector<Point>& contour, vector<int>& 
 		//We store defects points in the convexDefects parameter.
 		for (int i = 0; i<defects->total; i++){
 			ConvexityDefect def;
-			def.start = Point(defectArray[i].start->x, defectArray[i].start->y);
-			def.end = Point(defectArray[i].end->x, defectArray[i].end->y);
-			def.depth_point = Point(defectArray[i].depth_point->x, defectArray[i].depth_point->y);
+			def.start = cv::Point(defectArray[i].start->x, defectArray[i].start->y);
+			def.end = cv::Point(defectArray[i].end->x, defectArray[i].end->y);
+			def.depth_point = cv::Point(defectArray[i].depth_point->x, defectArray[i].depth_point->y);
 			def.depth = defectArray[i].depth;
 			convexDefects.push_back(def);
 		}
@@ -2238,8 +2297,8 @@ void ProjectorCamera::findConvexityDefects(vector<Point>& contour, vector<int>& 
 	}
 }
 
-Point ProjectorCamera::CalculateSumofPoints(Point pointA, Point pointB){
-	return Size(pointA.x + pointB.x, pointA.y + pointB.y);
+cv::Point ProjectorCamera::CalculateSumofPoints(cv::Point pointA, cv::Point pointB){
+	return cv::Size(pointA.x + pointB.x, pointA.y + pointB.y);
 }
 
 void ProjectorCamera::inAirGestureManage(bool& openstate, int& handwave){
@@ -2362,11 +2421,11 @@ void ProjectorCamera::getDynamicBgDepth()
 				ifBackground.push_back(true);
 			}
 			//LOGD("ifBackground is OK,frameId = %d", frameId);
-			averaImg = Mat(depthImg.rows, depthImg.cols, CV_32F);
+			averaImg = cv::Mat(depthImg.rows, depthImg.cols, CV_32F);
 			LOGD("Background initialization completed!,frameId = %d", frameId);
 			//averaImg = depthImg.clone();
 			assert(depthImg.rows == averaImg.rows && depthImg.cols == averaImg.cols);
-			Mat sum = bgdepths[0].clone();
+			cv::Mat sum = bgdepths[0].clone();
 			for (int i = 1; i < initFrames; i++)
 				sum = sum + bgdepths[i];
 			averaImg = sum / initFrames;
@@ -2380,7 +2439,7 @@ void ProjectorCamera::getDynamicBgDepth()
 			CVTIME getBgDepthTime;
 			LOGD("enter the if loop,frameId = %d", frameId);
 			int obsPixel = 0;
-			Mat sum = bgdepths[initFrames - calLength].clone();int fingerFrameNum = 0;
+			cv::Mat sum = bgdepths[initFrames - calLength].clone();int fingerFrameNum = 0;
 			for (int i = initFrames - calLength + 1; i < initFrames; i++){
 			    sum = sum + bgdepths[i];
 			}
@@ -2393,7 +2452,7 @@ void ProjectorCamera::getDynamicBgDepth()
 			if(fingerFrameNum >= 1)
 			    return;
 			LOGD("bgdepths adding successfully,frameId = %d", frameId);
-			Mat avimg = sum / calLength;
+			cv::Mat avimg = sum / calLength;
 			for (int row = 15; row < avimg.rows-25; row++)
 				for (int col = 10; col < avimg.cols-10; col++)
 				{
