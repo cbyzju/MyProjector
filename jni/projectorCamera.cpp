@@ -1152,63 +1152,29 @@ void ProjectorCamera::findOnDeskObject()
 		clockwiseContour(vpoints);
 		vpoints.push_back(centerPoint);
 
+		//去除镜头的径向畸变
+		for (size_t mk = 0; mk < vpoints.size(); ++mk)
+		{
+			vpoints[mk].x += screenRoi.x;
+			vpoints[mk].y += screenRoi.y;
+		}
+		//vector<cv::Point2f> point_in_camera_undised;
+		cv::undistortPoints(vpoints, vpoints, depth_KK, depth_dis, cv::Mat::eye(3, 3, CV_64F), depth_KK);
+		for (size_t mk = 0; mk < vpoints.size(); ++mk)
+		{
+			vpoints[mk].x -= screenRoi.x;
+			vpoints[mk].y -= screenRoi.y;
+		}
+
 		pcl::PointCloud<pcl::PointXYZ>::Ptr target(new pcl::PointCloud<pcl::PointXYZ>);
 		pcl::PointCloud<pcl::PointXYZ>::Ptr source(new pcl::PointCloud<pcl::PointXYZ>);
 		pcl::PointCloud<pcl::PointXYZ>::Ptr result(new pcl::PointCloud<pcl::PointXYZ>);
 
-		if (pcl::io::loadPCDFile<pcl::PointXYZ>("five.pcd", *target) == -1)//打开点云文件
+		if (pcl::io::loadPCDFile<pcl::PointXYZ>("five_f.pcd", *target) == -1)//打开点云文件
 		{
 			PCL_ERROR("Couldn't read file target.pcd\n");
 			return;
 		}
-
-		for (size_t kk = 0; kk < target->points.size(); ++kk)
-			cout << target->points[kk] << " ";
-
-		source->width = target->points.size();
-		source->height = 1;
-		source->is_dense = false;
-		source->points.resize(source->width * source->height);
-		vector<float> corner_depth;   //角点与中点的深度值
-		vector<cv::Point3f> corner_pro;
-		for (size_t i = 0; i < vpoints.size(); ++i)
-			corner_depth.push_back(depthImg.at<float>(vpoints[i].y, vpoints[i].x));
-		calibDepToPro(vpoints, corner_depth, corner_pro); //检测出的四个角点与中点在投影仪坐标系下的坐标
-
-		for (size_t i = 0; i < source->points.size(); ++i)
-		{
-			source->points[i].x = corner_pro[i].x;
-			source->points[i].y = corner_pro[i].y;
-			source->points[i].z = corner_pro[i].z;
-		}
-
-		size_t iterations = 200;
-		//pcl::GeneralizedIterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
-		pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
-		icp.setEuclideanFitnessEpsilon(1e-8);
-		//icp.setTransformationEpsilon(1e-6);
-		//icp.setMaximumIterations(iterations);
-		icp.setInputSource(source);
-		icp.setInputTarget(target);
-		icp.align(*result);
-		Eigen::Matrix4f transformation = icp.getFinalTransformation(); // Obtain the transformation that aligned source to target
-
-		Eigen::Matrix<double, 3, 3> RR;
-		Eigen::Matrix<double, 3, 3> R_inv;
-		Eigen::Matrix<double, 3, 1> TT;
-		RR << transformation(0, 0), transformation(0, 1), transformation(0, 2),
-			  transformation(1, 0), transformation(1, 1), transformation(1, 2),
-			  transformation(2, 0), transformation(2, 1), transformation(2, 2);
-		R_inv = RR.inverse();
-		TT << transformation(0, 3), transformation(1, 3), transformation(2, 3);
-		Eigen::Matrix<double, 3, 4> Corner;
-		Eigen::Matrix<double, 3, 1> Point;
-		for (size_t ii = 0; ii < 4; ++ii)
-		{
-			Point << target->points[ii].x, target->points[ii].y, target->points[ii].z;
-			Corner.col(ii) = R_inv * (Point - TT);  //模板点在投影仪坐标系下的坐标
-		}
-
 		double cx = depth_KK.at<double>(0, 2);
 		double cy = depth_KK.at<double>(1, 2);
 		double fx = depth_KK.at<double>(0, 0);
@@ -1226,17 +1192,65 @@ void ProjectorCamera::findOnDeskObject()
 			         colToProR.at<double>(1, 0), colToProR.at<double>(1, 1), colToProR.at<double>(1, 2),
 			         colToProR.at<double>(2, 0), colToProR.at<double>(2, 1), colToProR.at<double>(2, 2);
 		ColToProT << colToProT.at<double>(0, 0), colToProT.at<double>(1, 0), colToProT.at<double>(2, 0);
+
+		source->width = target->points.size();
+		source->height = 1;
+		source->is_dense = false;
+		source->points.resize(source->width * source->height);
+
+		Eigen::Matrix<double, 3, 1> Tmp;
+		Eigen::Matrix<double, 3, 1> PointInCol;
+		for (size_t k = 0; k < source->points.size(); ++k) //图像像素坐标系下点在相机坐标系下的物理坐标
+		{
+			double depthVal = depthImg.at<float>(vpoints[k].y, vpoints[k].x);
+			Tmp(0, 0) = depthVal * (vpoints[k].x + screenRoi.x - cx)*1.0 / fx;
+			Tmp(1, 0) = depthVal * (vpoints[k].y + screenRoi.y - cy)*1.0 / fy;
+			Tmp(2, 0) = depthVal;
+			PointInCol = DepToColR*Tmp + DepToColT;
+			source->points[k].x = PointInCol(0, 0);
+			source->points[k].y = PointInCol(1, 0);
+			source->points[k].z = PointInCol(2, 0);
+		}
+
+		size_t iterations = 200;
+		//pcl::GeneralizedIterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+		pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+		icp.setEuclideanFitnessEpsilon(1e-8);
+		//.setTransformationEpsilon(1e-8);
+		//icp.setMaximumIterations(iterations);
+		icp.setInputSource(source);
+		icp.setInputTarget(target);
+		icp.align(*result);
+		Eigen::Matrix4f transformation = icp.getFinalTransformation(); // Obtain the transformation that aligned source to target
+
+		Eigen::Matrix<double, 3, 3> RR;
+		Eigen::Matrix<double, 3, 3> R_inv;
+		Eigen::Matrix<double, 3, 1> TT;
+		RR << transformation(0, 0), transformation(0, 1), transformation(0, 2),
+			  transformation(1, 0), transformation(1, 1), transformation(1, 2),
+			  transformation(2, 0), transformation(2, 1), transformation(2, 2);
+		R_inv = RR.inverse();
+		TT << transformation(0, 3), transformation(1, 3), transformation(2, 3);
+		Eigen::Matrix<double, 3, 4> Corner;
+		Eigen::Matrix<double, 3, 1> Point;
+		for (size_t ii = 0; ii < 4; ++ii)   //
+		{
+			Point << target->points[ii].x, target->points[ii].y, target->points[ii].z;
+			Corner.col(ii) = R_inv * (Point - TT);  //模板点在相机坐标系下的坐标
+		}
+
 		Eigen::Matrix<double, 3, 4> CornerInImage;
 		for (size_t ii = 0; ii < 4; ++ii)
 		{
-			Corner(0, ii) = -Corner(0, ii);
-			CornerInImage.col(ii) = ColToProR.inverse()*(Corner.col(ii) - ColToProT);
-			CornerInImage.col(ii) = DepToColR.inverse()*(CornerInImage.col(ii) - DepToColT);
-			//cout << CornerInImage.col(ii) << endl;
+			//Corner(0, ii) = -Corner(0, ii);
+			//Corner.col(ii) = ColToProR.inverse()*(Corner.col(ii) - ColToProT);
+			CornerInImage.col(ii) = DepToColR.inverse()*(Corner.col(ii) - DepToColT);
 			CornerInImage(0, ii) = CornerInImage(0, ii)*fx / CornerInImage(2, ii) + cx- screenRoi.x;
 			CornerInImage(1, ii) = CornerInImage(1, ii)*fy / CornerInImage(2, ii) + cy - screenRoi.y;
 			circle(foreground, cv::Point2f(CornerInImage(0, ii), CornerInImage(1, ii)), 5, cv::Scalar(0, 0, 255), -1);
 			circle(colorImg, cv::Point2f(CornerInImage(0, ii), CornerInImage(1, ii) - 10), 5, cv::Scalar(0, 0, 255), -1);
+			circle(colorImg, cv::Point2f(vpoints[ii].x, vpoints[ii].y - 10), 3, cv::Scalar(0, 0, 255), -1);
+			cout << vpoints[ii] << " ";
 		}
 
 
