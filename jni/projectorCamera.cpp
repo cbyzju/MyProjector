@@ -464,8 +464,7 @@ void ProjectorCamera::processing(cv::Mat& iRSrc, cv::Mat& depthSrc)
 
 	//ir image preprocessing
 	cv::Rect irRoi = screenRoi;
-	irRoi.y -= 8;
-	cv::flip(iRSrc,iRSrc,1);
+	//irRoi.y -= 8;
 	irImage  = iRSrc(irRoi);
 	colorImg = irImage;
 
@@ -509,6 +508,7 @@ void ProjectorCamera::processing(cv::Mat& iRSrc, cv::Mat& depthSrc)
 			//LOGD("nativeStart caught findFingerTime: %f", findFingerTime.getClock());
 		}
 
+		appState = 1;
 		//LOGD("appState: %d", appState);
 		if (appState == 1)
 		{
@@ -791,9 +791,7 @@ void ProjectorCamera::findFinger()
 	//clear last touch information
 	vector<TouchHand> vtouchHand_last;
 	if (fingerTouchRole.histTouchHands.size() > 0)
-	{
 		vtouchHand_last = fingerTouchRole.histTouchHands[fingerTouchRole.histTouchHands.size() - 1];
-	}
 
 	//clear last touch infor and save current infor
 	fingerTouchRole.curtTouchHands.clear();
@@ -807,7 +805,7 @@ void ProjectorCamera::findFinger()
 	{
 		//object intersection points with border
 		int crossNum = intersectionPointsWithBoard(objects[ind]);		
-		if (crossNum < 2 || crossNum>6) continue;
+		if (crossNum < 2 || crossNum>6) continue;  //交点过少或者过多，都不处理
 		
 		//approxPolyDP current object coutour
 		TouchHand curtHand;
@@ -899,16 +897,16 @@ void ProjectorCamera::findFinger()
 
 			//save touch points information		
 			TouchPoint touchPoint;
-			touchPoint.tipPosition = curtHand.approxCurve[index];//fingerTip;//curtHand.approxCurve[index];
-			touchPoint.tipDepth    = averaImg.at<float>(touchPoint.tipPosition.y, touchPoint.tipPosition.x);
-			touchPoint.bottomPosition = curtHand.palmCenter;
-			touchPoint.bottomDepth    = depthImg.at<float>(curtHand.palmCenter);
-			touchPoint.getAngle();
-			touchPoint.getOrien();
-			touchPoint.palmToTip = touchPoint.tipPosition - cv::Point2f(curtHand.palmCenter.x, curtHand.palmCenter.y);
-			touchPoint.frameId   = frameId;
+			touchPoint.tipPosition = curtHand.approxCurve[index];//fingerTip;//curtHand.approxCurve[index]; 指尖在图像中的坐标
+			touchPoint.tipDepth    = averaImg.at<float>(touchPoint.tipPosition.y, touchPoint.tipPosition.x); //指尖位置的深度值
+			touchPoint.bottomPosition = curtHand.palmCenter;    //手掌中心位置
+			touchPoint.bottomDepth    = depthImg.at<float>(curtHand.palmCenter);  //手掌中心位置的深度值
+			touchPoint.getAngle();  //指尖的角度
+			touchPoint.getOrien();  //指尖的方向
+			touchPoint.palmToTip = touchPoint.tipPosition - cv::Point2f(curtHand.palmCenter.x, curtHand.palmCenter.y); //指尖到掌心的位移
+			touchPoint.frameId   = frameId;  //Id
 			touchPoint.isReal    = true;
-			touchPoint.tipInPro  = calibDepToPro(touchPoint.tipPosition, touchPoint.tipDepth);
+			touchPoint.tipInPro  = calibDepToPro(touchPoint.tipPosition, touchPoint.tipDepth); //指尖位置在投影仪坐标系下的坐标
 			//touchPoint.tipInPro  = homogCamToPro(touchPoint.tipPosition);
 
 			LOGD("nativeStart caught in findFinger detect touchPoint: %d %f %f %f %f %f %f/n", frameId,
@@ -1164,6 +1162,9 @@ void ProjectorCamera::findOnDeskObject()
 			return;
 		}
 
+		for (size_t kk = 0; kk < target->points.size(); ++kk)
+			cout << target->points[kk] << " ";
+
 		source->width = target->points.size();
 		source->height = 1;
 		source->is_dense = false;
@@ -1200,15 +1201,59 @@ void ProjectorCamera::findOnDeskObject()
 			  transformation(2, 0), transformation(2, 1), transformation(2, 2);
 		R_inv = RR.inverse();
 		TT << transformation(0, 3), transformation(1, 3), transformation(2, 3);
-		Eigen::Matrix<double, 3, 5> Corner;
+		Eigen::Matrix<double, 3, 4> Corner;
 		Eigen::Matrix<double, 3, 1> Point;
-		for (size_t ii = 0; ii < target->points.size(); ++ii)
+		for (size_t ii = 0; ii < 4; ++ii)
 		{
 			Point << target->points[ii].x, target->points[ii].y, target->points[ii].z;
 			Corner.col(ii) = R_inv * (Point - TT);  //模板点在投影仪坐标系下的坐标
 		}
-		cout << Corner << endl;
-		return;
+
+		double cx = depth_KK.at<double>(0, 2);
+		double cy = depth_KK.at<double>(1, 2);
+		double fx = depth_KK.at<double>(0, 0);
+		double fy = depth_KK.at<double>(1, 1);
+		Eigen::Matrix<double, 3, 3> DepToColR;
+		Eigen::Matrix<double, 3, 1> DepToColT;
+		Eigen::Matrix<double, 3, 3> ColToProR;
+		Eigen::Matrix<double, 3, 1> ColToProT;
+
+		DepToColR << depToColR.at<double>(0, 0), depToColR.at<double>(0, 1), depToColR.at<double>(0, 2),
+			         depToColR.at<double>(1, 0), depToColR.at<double>(1, 1), depToColR.at<double>(1, 2),
+			         depToColR.at<double>(2, 0), depToColR.at<double>(2, 1), depToColR.at<double>(2, 2);
+		DepToColT << depToColT.at<double>(0, 0), depToColT.at<double>(1, 0), depToColT.at<double>(2, 0);
+		ColToProR << colToProR.at<double>(0, 0), colToProR.at<double>(0, 1), colToProR.at<double>(0, 2),
+			         colToProR.at<double>(1, 0), colToProR.at<double>(1, 1), colToProR.at<double>(1, 2),
+			         colToProR.at<double>(2, 0), colToProR.at<double>(2, 1), colToProR.at<double>(2, 2);
+		ColToProT << colToProT.at<double>(0, 0), colToProT.at<double>(1, 0), colToProT.at<double>(2, 0);
+		Eigen::Matrix<double, 3, 4> CornerInImage;
+		for (size_t ii = 0; ii < 4; ++ii)
+		{
+			Corner(0, ii) = -Corner(0, ii);
+			CornerInImage.col(ii) = ColToProR.inverse()*(Corner.col(ii) - ColToProT);
+			CornerInImage.col(ii) = DepToColR.inverse()*(CornerInImage.col(ii) - DepToColT);
+			//cout << CornerInImage.col(ii) << endl;
+			CornerInImage(0, ii) = CornerInImage(0, ii)*fx / CornerInImage(2, ii) + cx- screenRoi.x;
+			CornerInImage(1, ii) = CornerInImage(1, ii)*fy / CornerInImage(2, ii) + cy - screenRoi.y;
+			circle(foreground, cv::Point2f(CornerInImage(0, ii), CornerInImage(1, ii)), 5, cv::Scalar(0, 0, 255), -1);
+			circle(colorImg, cv::Point2f(CornerInImage(0, ii), CornerInImage(1, ii) - 10), 5, cv::Scalar(0, 0, 255), -1);
+		}
+
+
+		//cout << Corner << endl;
+		//vector<cv::Point3f> lastVertex3D = stereoProjectDesk.proVertex3D;
+		//stereoProjectDesk.proVertex3D.clear();
+
+		 
+		//for (size_t ii = 0; ii < 4; ++ii)
+		//{
+		//	stereoProjectDesk.proVertex3D[ii].x = CornerInImage(0, ii);
+		//	stereoProjectDesk.proVertex3D[ii].y = CornerInImage(1, ii);
+		//	stereoProjectDesk.proVertex3D[ii].z = CornerInImage(2, ii);
+		//}
+
+		//stereoProjectDesk.valid = true;
+		continue;
 
         for(int dex=0;dex<vpoints.size();dex++)
         {
@@ -1314,6 +1359,10 @@ void ProjectorCamera::findOnDeskObject()
 		}
 		stereoProjectDesk.boatDemo = boatDemo;
 	}
+	cv::imshow("foreground", foreground);
+	cv::waitKey(1);
+	cv::imshow("irimage", colorImg);
+	cv::waitKey(1);
 }
 
 /*!
@@ -1331,7 +1380,7 @@ void ProjectorCamera::clockwiseContour(vector<cv::Point2f>& verticals)
     cv::Scalar center = cv::mean(verticals);
     cv::Point2f O(center.val[0], center.val[1]);
     cv::Point2f a = verticals[0] - O;//o->a
-    cv::Point2f b = verticals[1] - O;//o->a
+    cv::Point2f b = verticals[1] - O;//o->b
 
 	//use vector cross product to jugdy clockwise orientation
     float hint = a.x*b.y - b.x*a.y;

@@ -1,6 +1,7 @@
 #include "projectorCamera.h"
 #include  "AstraData.h"
 #include "Htime.h"
+#include <opencv2\highgui\highgui.hpp>
 
 string intTostring(int num)
 {
