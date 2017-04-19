@@ -1145,6 +1145,39 @@ void ProjectorCamera::findOnDeskObject()
 		rorec.points(ppt);
 		vector<cv::Point2f> vpoints(ppt, ppt + 4),vpoints2(4);
 
+#pragma region read camera parameters and store them by Eigen, it is convinient for calculating
+		double cx = depth_KK.at<double>(0, 2);
+		double cy = depth_KK.at<double>(1, 2);
+		double fx = depth_KK.at<double>(0, 0);
+		double fy = depth_KK.at<double>(1, 1);
+		Eigen::Matrix<double, 3, 3> DepToColR;
+		Eigen::Matrix<double, 3, 1> DepToColT;
+		Eigen::Matrix<double, 3, 3> ColToProR;
+		Eigen::Matrix<double, 3, 1> ColToProT;
+
+		DepToColR << depToColR.at<double>(0, 0), depToColR.at<double>(0, 1), depToColR.at<double>(0, 2),
+			depToColR.at<double>(1, 0), depToColR.at<double>(1, 1), depToColR.at<double>(1, 2),
+			depToColR.at<double>(2, 0), depToColR.at<double>(2, 1), depToColR.at<double>(2, 2);
+		DepToColT << depToColT.at<double>(0, 0), depToColT.at<double>(1, 0), depToColT.at<double>(2, 0);
+		ColToProR << colToProR.at<double>(0, 0), colToProR.at<double>(0, 1), colToProR.at<double>(0, 2),
+			colToProR.at<double>(1, 0), colToProR.at<double>(1, 1), colToProR.at<double>(1, 2),
+			colToProR.at<double>(2, 0), colToProR.at<double>(2, 1), colToProR.at<double>(2, 2);
+		ColToProT << colToProT.at<double>(0, 0), colToProT.at<double>(1, 0), colToProT.at<double>(2, 0);
+#pragma endregion
+
+#pragma region read the template and construct target point cloud
+		pcl::PointCloud<pcl::PointXYZ>::Ptr target(new pcl::PointCloud<pcl::PointXYZ>);
+		pcl::PointCloud<pcl::PointXYZ>::Ptr source(new pcl::PointCloud<pcl::PointXYZ>);
+		pcl::PointCloud<pcl::PointXYZ>::Ptr result(new pcl::PointCloud<pcl::PointXYZ>);
+
+		if (pcl::io::loadPCDFile<pcl::PointXYZ>("five_f.pcd", *target) == -1)// open template point cloud
+		{
+			PCL_ERROR("Couldn't read file target.pcd\n");
+			return;
+		}
+#pragma endregion
+
+#pragma region construct source point cloud, select four corner points and the center
 		vpoints[0] = temHand.approxCurve[0];
 		vpoints[1] = temHand.approxCurve[1];
 		vpoints[2] = temHand.approxCurve[2];
@@ -1152,7 +1185,28 @@ void ProjectorCamera::findOnDeskObject()
 		clockwiseContour(vpoints);
 		vpoints.push_back(centerPoint);
 
+		source->width = target->points.size();
+		source->height = 1;
+		source->is_dense = false;
+		source->points.resize(source->width * source->height);
+		Eigen::Matrix<double, 3, 1> Tmp;
+		Eigen::Matrix<double, 3, 1> PointInCol;
+		for (size_t k = 0; k < vpoints.size(); ++k) //图像像素坐标系下的点在相机坐标系下的物理坐标
+		{
+			double depthVal = depthImg.at<float>(vpoints[k].y, vpoints[k].x);
+			Tmp(0, 0) = depthVal * (vpoints[k].x + screenRoi.x - cx)*1.0 / fx;
+			Tmp(1, 0) = depthVal * (vpoints[k].y + screenRoi.y - cy)*1.0 / fy;
+			Tmp(2, 0) = depthVal;
+			PointInCol = DepToColR*Tmp + DepToColT;
+			source->points[k].x = PointInCol(0, 0);
+			source->points[k].y = PointInCol(1, 0);
+			source->points[k].z = PointInCol(2, 0);
+			//cout << "( " << PointInCol(0, 0) << "," << PointInCol(1, 0) << ", " << PointInCol(2, 0) <<")"<< endl;
+		}
+#pragma endregion
+
 		//去除镜头的径向畸变
+		/*
 		for (size_t mk = 0; mk < vpoints.size(); ++mk)
 		{
 			vpoints[mk].x += screenRoi.x;
@@ -1165,53 +1219,10 @@ void ProjectorCamera::findOnDeskObject()
 			vpoints[mk].x -= screenRoi.x;
 			vpoints[mk].y -= screenRoi.y;
 		}
+		*/
 
-		pcl::PointCloud<pcl::PointXYZ>::Ptr target(new pcl::PointCloud<pcl::PointXYZ>);
-		pcl::PointCloud<pcl::PointXYZ>::Ptr source(new pcl::PointCloud<pcl::PointXYZ>);
-		pcl::PointCloud<pcl::PointXYZ>::Ptr result(new pcl::PointCloud<pcl::PointXYZ>);
 
-		if (pcl::io::loadPCDFile<pcl::PointXYZ>("five_f.pcd", *target) == -1)//打开点云文件
-		{
-			PCL_ERROR("Couldn't read file target.pcd\n");
-			return;
-		}
-		double cx = depth_KK.at<double>(0, 2);
-		double cy = depth_KK.at<double>(1, 2);
-		double fx = depth_KK.at<double>(0, 0);
-		double fy = depth_KK.at<double>(1, 1);
-		Eigen::Matrix<double, 3, 3> DepToColR;
-		Eigen::Matrix<double, 3, 1> DepToColT;
-		Eigen::Matrix<double, 3, 3> ColToProR;
-		Eigen::Matrix<double, 3, 1> ColToProT;
-
-		DepToColR << depToColR.at<double>(0, 0), depToColR.at<double>(0, 1), depToColR.at<double>(0, 2),
-			         depToColR.at<double>(1, 0), depToColR.at<double>(1, 1), depToColR.at<double>(1, 2),
-			         depToColR.at<double>(2, 0), depToColR.at<double>(2, 1), depToColR.at<double>(2, 2);
-		DepToColT << depToColT.at<double>(0, 0), depToColT.at<double>(1, 0), depToColT.at<double>(2, 0);
-		ColToProR << colToProR.at<double>(0, 0), colToProR.at<double>(0, 1), colToProR.at<double>(0, 2),
-			         colToProR.at<double>(1, 0), colToProR.at<double>(1, 1), colToProR.at<double>(1, 2),
-			         colToProR.at<double>(2, 0), colToProR.at<double>(2, 1), colToProR.at<double>(2, 2);
-		ColToProT << colToProT.at<double>(0, 0), colToProT.at<double>(1, 0), colToProT.at<double>(2, 0);
-
-		source->width = target->points.size();
-		source->height = 1;
-		source->is_dense = false;
-		source->points.resize(source->width * source->height);
-
-		Eigen::Matrix<double, 3, 1> Tmp;
-		Eigen::Matrix<double, 3, 1> PointInCol;
-		for (size_t k = 0; k < source->points.size(); ++k) //图像像素坐标系下点在相机坐标系下的物理坐标
-		{
-			double depthVal = depthImg.at<float>(vpoints[k].y, vpoints[k].x);
-			Tmp(0, 0) = depthVal * (vpoints[k].x + screenRoi.x - cx)*1.0 / fx;
-			Tmp(1, 0) = depthVal * (vpoints[k].y + screenRoi.y - cy)*1.0 / fy;
-			Tmp(2, 0) = depthVal;
-			PointInCol = DepToColR*Tmp + DepToColT;
-			source->points[k].x = PointInCol(0, 0);
-			source->points[k].y = PointInCol(1, 0);
-			source->points[k].z = PointInCol(2, 0);
-		}
-
+#pragma region icp registration
 		size_t iterations = 200;
 		//pcl::GeneralizedIterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
 		pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
@@ -1231,6 +1242,9 @@ void ProjectorCamera::findOnDeskObject()
 			  transformation(2, 0), transformation(2, 1), transformation(2, 2);
 		R_inv = RR.inverse();
 		TT << transformation(0, 3), transformation(1, 3), transformation(2, 3);
+#pragma endregion
+
+#pragma region move the key points in template to the right place by RT matrix achieved by icp algorithm
 		Eigen::Matrix<double, 3, 4> Corner;
 		Eigen::Matrix<double, 3, 1> Point;
 		for (size_t ii = 0; ii < 4; ++ii)   //
@@ -1242,31 +1256,137 @@ void ProjectorCamera::findOnDeskObject()
 		Eigen::Matrix<double, 3, 4> CornerInImage;
 		for (size_t ii = 0; ii < 4; ++ii)
 		{
-			//Corner(0, ii) = -Corner(0, ii);
-			//Corner.col(ii) = ColToProR.inverse()*(Corner.col(ii) - ColToProT);
 			CornerInImage.col(ii) = DepToColR.inverse()*(Corner.col(ii) - DepToColT);
 			CornerInImage(0, ii) = CornerInImage(0, ii)*fx / CornerInImage(2, ii) + cx- screenRoi.x;
-			CornerInImage(1, ii) = CornerInImage(1, ii)*fy / CornerInImage(2, ii) + cy - screenRoi.y;
-			circle(foreground, cv::Point2f(CornerInImage(0, ii), CornerInImage(1, ii)), 5, cv::Scalar(0, 0, 255), -1);
-			circle(colorImg, cv::Point2f(CornerInImage(0, ii), CornerInImage(1, ii) - 10), 5, cv::Scalar(0, 0, 255), -1);
-			circle(colorImg, cv::Point2f(vpoints[ii].x, vpoints[ii].y - 10), 3, cv::Scalar(0, 0, 255), -1);
-			cout << vpoints[ii] << " ";
+			CornerInImage(1, ii) = CornerInImage(1, ii)*fy / CornerInImage(2, ii) + cy - screenRoi.y;  //模板点在图像坐标系下坐标
 		}
 
+		vector<cv::Point3f> reg(4);
+		Eigen::Matrix<double, 3, 4> CornerInPro;
+		for (size_t index = 0; index < 4; ++index) //模板点在投影仪坐标系下的坐标
+		{
+			CornerInPro.col(index) = ColToProR*Corner.col(index) + ColToProT;
+			CornerInPro(0, index) = -CornerInPro(0, index);
+		}
+		reg[0] = cv::Point3f(CornerInPro(0, 0), CornerInPro(1, 0), CornerInPro(2, 0));
+		reg[1] = cv::Point3f(CornerInPro(0, 3), CornerInPro(1, 3), CornerInPro(2, 3));
+		reg[2] = cv::Point3f(CornerInPro(0, 1), CornerInPro(1, 1), CornerInPro(2, 1));
+		reg[3] = cv::Point3f(CornerInPro(0, 2), CornerInPro(1, 2), CornerInPro(2, 2));
 
-		//cout << Corner << endl;
-		//vector<cv::Point3f> lastVertex3D = stereoProjectDesk.proVertex3D;
-		//stereoProjectDesk.proVertex3D.clear();
+#pragma endregion
 
-		 
-		//for (size_t ii = 0; ii < 4; ++ii)
-		//{
-		//	stereoProjectDesk.proVertex3D[ii].x = CornerInImage(0, ii);
-		//	stereoProjectDesk.proVertex3D[ii].y = CornerInImage(1, ii);
-		//	stereoProjectDesk.proVertex3D[ii].z = CornerInImage(2, ii);
-		//}
+#pragma region keep stable
+		//（1）匹配失败处理：如果匹配完的点与vpoints距离不大，就用匹配完的点（更精确）；否则使用vpoints（匹配失败）。
+		float max_dis = 0;
+		for (size_t mm = 0; mm < 4; ++mm)
+		{
+			float min_dis = 10000;
+			for (size_t nn = 0; nn < 4; ++nn)
+			{
+				float dis = sqrt((CornerInImage(0, mm) - vpoints[nn].x)*(CornerInImage(0, mm) - vpoints[nn].x) + (CornerInImage(1, mm) - vpoints[nn].y)*(CornerInImage(1, mm) - vpoints[nn].y));
+				if (dis < min_dis)
+					 min_dis = dis;
+			}
+			if (min_dis > max_dis)
+				max_dis = min_dis; //匹配出的4个点和检测出的4个点的最大距离
+		}
+		cout << "first stage: " << max_dis << endl;
+		float dis_diff = 15;
+		vector<cv::Point3f> output_1;
+		vector<cv::Point2f> vpoints_four;
+		vector<float>  vertexDepth;
+		if (max_dis > dis_diff)
+		{
+			for (size_t index = 0; index < 4; ++index)
+			{
+				vpoints_four.push_back(vpoints[index]);
+				vertexDepth.push_back(depthImg.at<float>(vpoints[index].y, vpoints[index].x));
+			}		
+			calibDepToPro(vpoints_four, vertexDepth, output_1);  //如果距离过大，使用vpoints在投影仪坐标系下的坐标
+			cout << "I use vpoints" << endl;
+		}
+		else
+		{ 
+			output_1 = reg;  //否则使用icp匹配出的点坐标
+			cout << "I use icp" << endl;
+		}
+			
+		//（2）防抖处理：如果（1）输出的点与上一次的点距离不大，就用上一次的点（防抖动）；否则使用本次的点（物体被移动）。
+		vector<cv::Point3f> lastVertex3D = stereoProjectDesk.proVertex3D;
+		stereoProjectDesk.proVertex3D.clear();
+		vector<cv::Point3f> output_2;
+		if (stereoProjectDesk.lastId == 0)
+		{
+			output_2 = output_1;
+			stereoProjectDesk.proVertex3D = output_2;
+			stereoProjectDesk.lastId++;
+			stereoProjectDesk.valid = true;
+			continue;
+		}
+			
+		stereoProjectDesk.lastId++;
+		cout << "last Id: " << stereoProjectDesk.lastId<< endl;
+	    
+		max_dis = 0;
+		for (size_t mm = 0; mm < output_1.size(); ++mm)
+		{
+			float min_dis = 10000;
+			for (size_t nn = 0; nn < lastVertex3D.size(); ++nn)
+			{
+				float dis = sqrt((output_1[mm].x - lastVertex3D[nn].x)*(output_1[mm].x - lastVertex3D[nn].x) + (output_1[mm].y - lastVertex3D[nn].y)*(output_1[mm].y - lastVertex3D[nn].y));
+				if (dis < min_dis)
+					min_dis = dis;
+			}
+			if (min_dis > max_dis)
+				max_dis = min_dis;
+		}
 
-		//stereoProjectDesk.valid = true;
+		cout << "second stage: " << max_dis << endl;
+		float second_diff = 5;
+		if (max_dis > second_diff)
+		{
+			output_2 = output_1;
+			cout << "I use current" << endl;
+		}	
+		else
+		{
+			output_2 = lastVertex3D;
+			cout << "I use last" << endl;
+		}
+
+		stereoProjectDesk.proVertex3D = output_2;
+		stereoProjectDesk.valid = true;
+
+		Eigen::Matrix<double, 3, 4> show;
+		show << output_2[0].x, output_2[1].x, output_2[2].x, output_2[3].x,
+			    output_2[0].y, output_2[1].y, output_2[2].y, output_2[3].y,
+			    output_2[0].z, output_2[1].z, output_2[2].z, output_2[3].z;
+
+		for (size_t ii = 0; ii < 4; ++ii)
+		{
+			show(0, ii) = -show(0, ii);
+			show.col(ii) = ColToProR.inverse()*(show.col(ii) - ColToProT);
+			show.col(ii) = DepToColR.inverse()*(show.col(ii) - DepToColT);
+			show(0, ii) = show(0, ii)*fx / show(2, ii) + cx - screenRoi.x;
+			show(1, ii) = show(1, ii)*fy / show(2, ii) + cy - screenRoi.y;  //匹配完的点，转到图像坐标系下
+			circle(foreground, cv::Point2f(show(0, ii), show(1, ii)), 5, cv::Scalar(0, 0, 255), -1);
+			circle(colorImg, cv::Point2f(show(0, ii), show(1, ii) - 10), 5, cv::Scalar(0, 0, 255), -1);
+			//circle(colorImg, cv::Point2f(vpoints[ii].x, vpoints[ii].y - 10), 3, cv::Scalar(0, 0, 255), -1);
+			//cout << "detected points: (" << CornerInImage(0, ii) << ", " << CornerInImage(1, ii) << ") ";
+			//cout << "vpoints:" << vpoints[ii] << " ";
+		}
+#pragma endregion
+
+#pragma region debug
+		cout << "detected vpoints: " << endl;
+		for (size_t kk = 0; kk < 4; ++kk)
+		{
+			cout << "( " << vpoints[kk].x << ", " << vpoints[kk].y << ") ";
+		}
+		cout << endl;
+		cout << "icp points in image coordinate: " << endl;
+		cout << CornerInImage << endl;
+#pragma endregion
 		continue;
 
         for(int dex=0;dex<vpoints.size();dex++)
