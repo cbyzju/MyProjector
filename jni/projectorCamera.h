@@ -27,6 +27,8 @@ note:       projectorCamera system processing file
 #include <pcl/registration/icp.h>
 #include <pcl/point_types.h>
 
+#include <fstream>
+
 #define SCREEN_WIDTH_PX  1280
 #define SCREEN_HEIGHT_PX 720
 #define SALVER_WIDTH_MM  190
@@ -95,6 +97,7 @@ public:
 	cv::Point2f homogCamToPro(cv::Point2f);	
 	void refineVerticals(vector<cv::Point3f>&);
 	void clockwiseContour(vector<cv::Point2f>&);
+	void clockwiseContour(vector<cv::Point3f>&);
 	void clockwiseContour(vector<cv::Point>&);
 
 	//zhangbo

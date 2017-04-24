@@ -45,7 +45,7 @@ ProjectorCamera::ProjectorCamera()
 	setViewDepth = true;
 	initFrames = 50;
 	frameId    = 0;
-	nearSurFaceThresh = 5;
+	nearSurFaceThresh = 4;
 	nearCameraThresh  = 1000;
 	histMinPixs       = 15;
 
@@ -1144,6 +1144,22 @@ void ProjectorCamera::findOnDeskObject()
 		cv::Point2f ppt[4];
 		rorec.points(ppt);
 		vector<cv::Point2f> vpoints(ppt, ppt + 4),vpoints2(4);
+		vpoints[0] = temHand.approxCurve[0];
+		vpoints[1] = temHand.approxCurve[1];
+		vpoints[2] = temHand.approxCurve[2];
+		vpoints[3] = temHand.approxCurve[3];
+		for (size_t index = 0; index < 4; ++index)
+		{
+			for (size_t ind = 0; ind < 4; ++ind)
+			{
+				if (norm(vpoints[index] - ppt[ind]) < 20)
+					vpoints[index] = cv::Point2f((vpoints[index].x + ppt[ind].x) / 2, (vpoints[index].y + ppt[ind].y) / 2);
+			}
+		}
+		clockwiseContour(vpoints);
+		center = mean(vpoints);
+		centerPoint = cv::Point(center.val[0], center.val[1]);
+		vpoints.push_back(centerPoint);
 
 #pragma region read camera parameters and store them by Eigen, it is convinient for calculating
 		double cx = depth_KK.at<double>(0, 2);
@@ -1170,7 +1186,7 @@ void ProjectorCamera::findOnDeskObject()
 		pcl::PointCloud<pcl::PointXYZ>::Ptr source(new pcl::PointCloud<pcl::PointXYZ>);
 		pcl::PointCloud<pcl::PointXYZ>::Ptr result(new pcl::PointCloud<pcl::PointXYZ>);
 
-		if (pcl::io::loadPCDFile<pcl::PointXYZ>("five_f.pcd", *target) == -1)// open template point cloud
+		if (pcl::io::loadPCDFile<pcl::PointXYZ>("five_n.pcd", *target) == -1)// open template point cloud, five_f
 		{
 			PCL_ERROR("Couldn't read file target.pcd\n");
 			return;
@@ -1178,12 +1194,6 @@ void ProjectorCamera::findOnDeskObject()
 #pragma endregion
 
 #pragma region construct source point cloud, select four corner points and the center
-		vpoints[0] = temHand.approxCurve[0];
-		vpoints[1] = temHand.approxCurve[1];
-		vpoints[2] = temHand.approxCurve[2];
-		vpoints[3] = temHand.approxCurve[3];
-		clockwiseContour(vpoints);
-		vpoints.push_back(centerPoint);
 
 		source->width = target->points.size();
 		source->height = 1;
@@ -1193,7 +1203,7 @@ void ProjectorCamera::findOnDeskObject()
 		Eigen::Matrix<double, 3, 1> PointInCol;
 		for (size_t k = 0; k < vpoints.size(); ++k) //图像像素坐标系下的点在相机坐标系下的物理坐标
 		{
-			double depthVal = depthImg.at<float>(vpoints[k].y, vpoints[k].x);
+			double depthVal = averaImg.at<float>(vpoints[k].y, vpoints[k].x);
 			Tmp(0, 0) = depthVal * (vpoints[k].x + screenRoi.x - cx)*1.0 / fx;
 			Tmp(1, 0) = depthVal * (vpoints[k].y + screenRoi.y - cy)*1.0 / fy;
 			Tmp(2, 0) = depthVal;
@@ -1201,16 +1211,16 @@ void ProjectorCamera::findOnDeskObject()
 			source->points[k].x = PointInCol(0, 0);
 			source->points[k].y = PointInCol(1, 0);
 			source->points[k].z = PointInCol(2, 0);
-			//cout << "( " << PointInCol(0, 0) << "," << PointInCol(1, 0) << ", " << PointInCol(2, 0) <<")"<< endl;
+			cout << "( " << PointInCol(0, 0) << "," << PointInCol(1, 0) << ", " << PointInCol(2, 0) <<")"<< endl;
 		}
+		
 #pragma endregion
 
 		//去除镜头的径向畸变
-		/*
-		for (size_t mk = 0; mk < vpoints.size(); ++mk)
+		for (size_t index = 0; index < vpoints.size(); ++index)
 		{
-			vpoints[mk].x += screenRoi.x;
-			vpoints[mk].y += screenRoi.y;
+			vpoints[index].x += screenRoi.x;
+			vpoints[index].y += screenRoi.y;
 		}
 		//vector<cv::Point2f> point_in_camera_undised;
 		cv::undistortPoints(vpoints, vpoints, depth_KK, depth_dis, cv::Mat::eye(3, 3, CV_64F), depth_KK);
@@ -1219,8 +1229,6 @@ void ProjectorCamera::findOnDeskObject()
 			vpoints[mk].x -= screenRoi.x;
 			vpoints[mk].y -= screenRoi.y;
 		}
-		*/
-
 
 #pragma region icp registration
 		size_t iterations = 200;
@@ -1277,7 +1285,7 @@ void ProjectorCamera::findOnDeskObject()
 
 #pragma region keep stable
 		//（1）匹配失败处理：如果匹配完的点与vpoints距离不大，就用匹配完的点（更精确）；否则使用vpoints（匹配失败）。
-		float max_dis = 0;
+		float max_dis_1 = 0;
 		for (size_t mm = 0; mm < 4; ++mm)
 		{
 			float min_dis = 10000;
@@ -1287,23 +1295,27 @@ void ProjectorCamera::findOnDeskObject()
 				if (dis < min_dis)
 					 min_dis = dis;
 			}
-			if (min_dis > max_dis)
-				max_dis = min_dis; //匹配出的4个点和检测出的4个点的最大距离
+			if (min_dis > max_dis_1)
+				max_dis_1 = min_dis; //匹配出的4个点和检测出的4个点的最大距离
 		}
-		cout << "first stage: " << max_dis << endl;
-		float dis_diff = 15;
+		cout << "first stage: " << max_dis_1 << endl;
+		float first_diff = 15;
+		float second_diff = 6;
 		vector<cv::Point3f> output_1;
 		vector<cv::Point2f> vpoints_four;
 		vector<float>  vertexDepth;
-		if (max_dis > dis_diff)
+		if (max_dis_1 > first_diff)
 		{
 			for (size_t index = 0; index < 4; ++index)
 			{
 				vpoints_four.push_back(vpoints[index]);
-				vertexDepth.push_back(depthImg.at<float>(vpoints[index].y, vpoints[index].x));
-			}		
+				vertexDepth.push_back(averaImg.at<float>(vpoints[index].y, vpoints[index].x));
+			}	
+			
 			calibDepToPro(vpoints_four, vertexDepth, output_1);  //如果距离过大，使用vpoints在投影仪坐标系下的坐标
+			refineVerticals(output_1);
 			cout << "I use vpoints" << endl;
+			second_diff = 8; //vpoints的波动比较大
 		}
 		else
 		{ 
@@ -1312,13 +1324,18 @@ void ProjectorCamera::findOnDeskObject()
 		}
 			
 		//（2）防抖处理：如果（1）输出的点与上一次的点距离不大，就用上一次的点（防抖动）；否则使用本次的点（物体被移动）。
-		vector<cv::Point3f> lastVertex3D = stereoProjectDesk.proVertex3D;
-		stereoProjectDesk.proVertex3D.clear();
-		vector<cv::Point3f> output_2;
+		float bias = 2.5;    //y方向的系统偏差
+		float dep_bias = -9; //深度方向的系统偏差
+		vector<cv::Point3f> output_2(4);
 		if (stereoProjectDesk.lastId == 0)
 		{
 			output_2 = output_1;
 			stereoProjectDesk.proVertex3D = output_2;
+			for (size_t index = 0; index <stereoProjectDesk.proVertex3D.size(); ++index)
+			{
+				stereoProjectDesk.proVertex3D[index].y -= bias;
+				stereoProjectDesk.proVertex3D[index].z -= dep_bias;
+			}
 			stereoProjectDesk.lastId++;
 			stereoProjectDesk.valid = true;
 			continue;
@@ -1326,8 +1343,16 @@ void ProjectorCamera::findOnDeskObject()
 			
 		stereoProjectDesk.lastId++;
 		cout << "last Id: " << stereoProjectDesk.lastId<< endl;
-	    
-		max_dis = 0;
+	    	
+		for (size_t index = 0; index <stereoProjectDesk.proVertex3D.size(); ++index)
+		{
+			stereoProjectDesk.proVertex3D[index].y += bias;
+			stereoProjectDesk.proVertex3D[index].z += dep_bias;
+		}
+		vector<cv::Point3f> lastVertex3D = stereoProjectDesk.proVertex3D;
+		stereoProjectDesk.proVertex3D.clear();
+
+		float max_dis_2 = 0;
 		for (size_t mm = 0; mm < output_1.size(); ++mm)
 		{
 			float min_dis = 10000;
@@ -1337,23 +1362,46 @@ void ProjectorCamera::findOnDeskObject()
 				if (dis < min_dis)
 					min_dis = dis;
 			}
-			if (min_dis > max_dis)
-				max_dis = min_dis;
+			if (min_dis > max_dis_2)
+				max_dis_2 = min_dis;
 		}
 
-		cout << "second stage: " << max_dis << endl;
-		float second_diff = 5;
-		if (max_dis > second_diff)
+		cout << "second stage: " << max_dis_2 << endl;
+		if (max_dis_2 <= second_diff) // 0~6
+		{
+			output_2 = lastVertex3D;
+			cout << "I use " << endl;
+		}
+		else if (max_dis_2 > second_diff  && max_dis_2 < second_diff * 2) //6~10
+		{
+			for (size_t mm = 0; mm < 4; ++mm)
+			{
+				float min_dis = 1000;
+				for (size_t nn = 0; nn < 4; ++nn)
+				{
+					float dis = sqrt((lastVertex3D[mm].x - output_1[nn].x)*(lastVertex3D[mm].x - output_1[nn].x) + (lastVertex3D[mm].y - output_1[nn].y)*(lastVertex3D[mm].y - output_1[nn].y));
+					cout << dis << endl;
+					if (dis < min_dis)
+					{
+						output_2[mm] = cv::Point3f((lastVertex3D[mm].x + output_1[nn].x) / 2, (lastVertex3D[mm].y + output_1[nn].y) / 2, (lastVertex3D[mm].z + output_1[nn].z) / 2);
+						min_dis = dis;
+					}
+						
+				}
+			}
+		}
+		else // >10
 		{
 			output_2 = output_1;
 			cout << "I use current" << endl;
-		}	
-		else
-		{
-			output_2 = lastVertex3D;
-			cout << "I use last" << endl;
 		}
-
+		
+		clockwiseContour(output_2);  //counter clockwise the points
+		for (size_t index = 0; index <output_2.size(); ++index)
+		{
+			output_2[index].y -= bias;
+			output_2[index].z -= dep_bias;
+		}
 		stereoProjectDesk.proVertex3D = output_2;
 		stereoProjectDesk.valid = true;
 
@@ -1371,22 +1419,41 @@ void ProjectorCamera::findOnDeskObject()
 			show(1, ii) = show(1, ii)*fy / show(2, ii) + cy - screenRoi.y;  //匹配完的点，转到图像坐标系下
 			circle(foreground, cv::Point2f(show(0, ii), show(1, ii)), 5, cv::Scalar(0, 0, 255), -1);
 			circle(colorImg, cv::Point2f(show(0, ii), show(1, ii) - 10), 5, cv::Scalar(0, 0, 255), -1);
-			//circle(colorImg, cv::Point2f(vpoints[ii].x, vpoints[ii].y - 10), 3, cv::Scalar(0, 0, 255), -1);
-			//cout << "detected points: (" << CornerInImage(0, ii) << ", " << CornerInImage(1, ii) << ") ";
-			//cout << "vpoints:" << vpoints[ii] << " ";
 		}
 #pragma endregion
 
 #pragma region debug
-		cout << "detected vpoints: " << endl;
+		ofstream outfile;
+		outfile.open("max_dis_1.txt", ios::app);
+		outfile << max_dis_1 << endl;
+		outfile.close();
+		outfile.open("max_dis_2.txt", ios::app);
+		outfile << max_dis_2 << endl;
+		outfile.close();
+		outfile.open("vpoints.txt", ios::app);
 		for (size_t kk = 0; kk < 4; ++kk)
-		{
-			cout << "( " << vpoints[kk].x << ", " << vpoints[kk].y << ") ";
-		}
-		cout << endl;
-		cout << "icp points in image coordinate: " << endl;
-		cout << CornerInImage << endl;
+				outfile << vpoints[kk].x << " " << vpoints[kk].y << endl;
+		outfile.close();
+		outfile.open("CornerInImage.txt", ios::app);
+		for (size_t kk = 0; kk < 4; ++kk)
+			outfile << CornerInImage(0, kk) << " "<< CornerInImage(1, kk) << endl;
+		outfile.close();
+		outfile.open("output_1.txt", ios::app);
+		for (size_t kk = 0; kk < 4; ++kk)
+			outfile << output_1[kk].x << " " << output_1[kk].y << " " << output_1[kk].z << endl;
+		outfile.close();
+
+		outfile.open("lastVertex3D.txt", ios::app);
+		for (size_t kk = 0; kk < 4; ++kk)
+			outfile << lastVertex3D[kk].x << " " << lastVertex3D[kk].y << " " << lastVertex3D[kk].z << endl;
+		outfile.close();
+		
+		outfile.open("output_2.txt", ios::app);
+		for (size_t kk = 0; kk < 4; ++kk)
+			outfile << output_2[kk].x << " " << output_2[kk].y << " " << output_2[kk].z << endl;
+		outfile.close();
 #pragma endregion
+
 		continue;
 
         for(int dex=0;dex<vpoints.size();dex++)
@@ -1500,7 +1567,7 @@ void ProjectorCamera::findOnDeskObject()
 }
 
 /*!
-@function              make sure contour points is colokwise
+@function              make sure contour points is counter clockwise
 @abstract			   using multiplication cross
 @discussion
 @param
@@ -1516,11 +1583,35 @@ void ProjectorCamera::clockwiseContour(vector<cv::Point2f>& verticals)
     cv::Point2f a = verticals[0] - O;//o->a
     cv::Point2f b = verticals[1] - O;//o->b
 
-	//use vector cross product to jugdy clockwise orientation
+	//use vector cross product to judge counter clockwise orientation
     float hint = a.x*b.y - b.x*a.y;
 
     if(hint < 0) reverse(verticals.begin(),verticals.end());
 }
+
+/*!
+@function              make sure contour points is counter clockwise
+@abstract			   using multiplication cross
+@discussion
+@param
+@result
+*/
+void ProjectorCamera::clockwiseContour(vector<cv::Point3f>& verticals)
+{
+	if (verticals.size()<3) return;
+
+	cv::Scalar center = cv::mean(verticals);
+	cv::Point2f O(center.val[0], center.val[1]);
+	cv::Point2f first(verticals[0].x, verticals[0].y);
+	cv::Point2f second(verticals[1].x, verticals[1].y);
+	cv::Point2f a = first - O;//o->a
+	cv::Point2f b = second - O;//o->b
+
+	//use vector cross product to judge counter clockwise orientation
+	float hint = a.x*b.y - b.x*a.y;
+	if (hint < 0) reverse(verticals.begin(), verticals.end());
+}
+
 
 /*!
 @function              make sure contour points is colokwise
