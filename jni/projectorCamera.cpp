@@ -487,10 +487,12 @@ void ProjectorCamera::processing(cv::Mat& iRSrc, cv::Mat& depthSrc)
 	//get foreground depth
 	CVTIME getFgDepthTime;
 	getFgDepth();
+	
 	//LOGD("nativeStart caught getFgDepthTime: %f", getFgDepthTime.getClock());
 
 	//sub thread do backGroundRefreshThread
 	std::thread backGroundRefreshThread{ &ProjectorCamera::getDynamicBgDepth, this };
+
 
 	//main thread do detection
 	try
@@ -1112,21 +1114,72 @@ void ProjectorCamera::findInAirObject()
 void ProjectorCamera::findOnDeskObject()
 {
 
+	int num_big_object = 0;
+	float plate_max = 14600;  //constraint the plate area
+	float plate_min = 11600;
+	for (int ind = 0; ind < objects.size(); ind++)
+	{
+		if (objects[ind].cArea >= 6500)
+			num_big_object++;
+	}
+	cout << "num_big_object: " << num_big_object << endl;
 	//LOGF("Processing flow : %s", "findOnDeskObject start");
 	for (int ind = 0; ind < objects.size(); ind++)
 	{
 	    LOGD("Processing flow findOnDeskObject: area%f", objects[ind].cArea);
-		if (objects[ind].cArea<6500 || objects[ind].cArea>19000) continue;
+		std::cout <<" area "<<ind << ": " << objects[ind].cArea << endl;
+		if (objects[ind].cArea<6500) continue;
 
-		//contour to 
 		TouchHand temHand;
 		cv::Mat contourMat = cv::Mat(objects[ind].contour);
 		cv::approxPolyDP(contourMat, temHand.approxCurve, 15, true);
-		if (temHand.approxCurve.size() != 4) continue;
-
 		bool boatDemo = false;
-		if (temHand.approxCurve.size() != 4) continue;
 
+		cv::Point2f ppt[4];
+		vector<cv::Point2f> vpoints(ppt, ppt + 4);
+#pragma region hand in the view, beside or on the plate
+		if (temHand.approxCurve.size() != 4)
+		{   
+			if (num_big_object >= 2) continue;  //这里我们只处理手放在盘子上时的情形，而剔除手和盘子同时在图像内，但两者分离的情况
+
+			cv::Mat hand, foreground_f;
+			cv::threshold(foreground, hand, 36, 255, CV_THRESH_BINARY);
+			cv::threshold(foreground, foreground_f, nearSurFaceThresh, 255, CV_THRESH_BINARY);
+			cv::Mat plate = foreground_f - hand; //binary: substract hand from the foreground image.
+			cv::Mat plate_show;
+			plate.convertTo(plate, CV_8UC1);     //used for findContours
+			cv::cvtColor(plate, plate_show, CV_GRAY2BGR);
+			vector< vector<cv::Point> > contours;
+
+			findContours(plate, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
+			vector<cv::Point> corner;
+
+			for (size_t index = 0; index < contours.size(); ++index)
+			{
+				// double contourArea(contour, oriented=false)  contour - input vector of 2D points, stored in std::vector or Mat
+				double area = contourArea(contours[index]);                 //轮廓面积
+				if (area < 2000)  //don't care noise
+					continue;
+
+				//drawContours(plate_show, contours, index, cv::Scalar(0, 255, 0), 2);       //画出轮廓线
+				approxPolyDP(contours[index], corner, 15, true);                           //用多边形去拟合轮廓，找到角点
+				for (size_t ind = 0; ind < corner.size(); ++ind)                           //在src中绘制角点
+					cv::circle(plate_show, corner[ind], 3, cv::Scalar(0, 0, 255), -1);
+
+				//minAreaRect: finds a rotated rectangle of the minimum area enclosing the input 2D input set
+				cv::RotatedRect rorec = minAreaRect(contours[index]);                      //寻找包含所有输入2D点的最小旋转矩形
+				cv::Point2f ppt[4];
+				rorec.points(ppt);
+				for (size_t ind = 0; ind < 4; ++ind)
+					cv::circle(plate_show, ppt[ind], 3, cv::Scalar(255, 255, 0), -1);
+			}
+			cv::imshow("plate_show", plate_show);
+			cv::waitKey(1);
+			continue;
+		}
+#pragma endregion
+
+		if (objects[ind].cArea<plate_min || objects[ind].cArea>plate_max) continue; //to remove hand
 		cv::Scalar center = mean(cv::Mat(temHand.approxCurve));
 		cv::Point centerPoint = cv::Point(center.val[0], center.val[1]);
 		float centerDepth = foreground.at<float>(centerPoint.y, centerPoint.x);
@@ -1134,16 +1187,14 @@ void ProjectorCamera::findOnDeskObject()
 		if (centerDepth > 100) continue;
 		//is a rectangle
 		if (abs(norm(temHand.approxCurve[0] - temHand.approxCurve[1])
-			- norm(temHand.approxCurve[2] - temHand.approxCurve[3])) > 50 ||
+			- norm(temHand.approxCurve[2] - temHand.approxCurve[3])) > 40 ||
 			abs(norm(temHand.approxCurve[2] - temHand.approxCurve[1])
-			- norm(temHand.approxCurve[0] - temHand.approxCurve[3])) > 50)
+			- norm(temHand.approxCurve[0] - temHand.approxCurve[3])) > 40)
 				continue;
 
 		//get four verticals 
 		cv::RotatedRect rorec = minAreaRect(objects[ind].contour);
-		cv::Point2f ppt[4];
 		rorec.points(ppt);
-		vector<cv::Point2f> vpoints(ppt, ppt + 4),vpoints2(4);
 		vpoints[0] = temHand.approxCurve[0];
 		vpoints[1] = temHand.approxCurve[1];
 		vpoints[2] = temHand.approxCurve[2];
@@ -1172,12 +1223,12 @@ void ProjectorCamera::findOnDeskObject()
 		Eigen::Matrix<double, 3, 1> ColToProT;
 
 		DepToColR << depToColR.at<double>(0, 0), depToColR.at<double>(0, 1), depToColR.at<double>(0, 2),
-			depToColR.at<double>(1, 0), depToColR.at<double>(1, 1), depToColR.at<double>(1, 2),
-			depToColR.at<double>(2, 0), depToColR.at<double>(2, 1), depToColR.at<double>(2, 2);
+			         depToColR.at<double>(1, 0), depToColR.at<double>(1, 1), depToColR.at<double>(1, 2),
+			         depToColR.at<double>(2, 0), depToColR.at<double>(2, 1), depToColR.at<double>(2, 2);
 		DepToColT << depToColT.at<double>(0, 0), depToColT.at<double>(1, 0), depToColT.at<double>(2, 0);
 		ColToProR << colToProR.at<double>(0, 0), colToProR.at<double>(0, 1), colToProR.at<double>(0, 2),
-			colToProR.at<double>(1, 0), colToProR.at<double>(1, 1), colToProR.at<double>(1, 2),
-			colToProR.at<double>(2, 0), colToProR.at<double>(2, 1), colToProR.at<double>(2, 2);
+			         colToProR.at<double>(1, 0), colToProR.at<double>(1, 1), colToProR.at<double>(1, 2),
+			         colToProR.at<double>(2, 0), colToProR.at<double>(2, 1), colToProR.at<double>(2, 2);
 		ColToProT << colToProT.at<double>(0, 0), colToProT.at<double>(1, 0), colToProT.at<double>(2, 0);
 #pragma endregion
 
@@ -1216,6 +1267,7 @@ void ProjectorCamera::findOnDeskObject()
 		
 #pragma endregion
 
+#pragma region remove lens distortion
 		//去除镜头的径向畸变
 		for (size_t index = 0; index < vpoints.size(); ++index)
 		{
@@ -1229,14 +1281,14 @@ void ProjectorCamera::findOnDeskObject()
 			vpoints[mk].x -= screenRoi.x;
 			vpoints[mk].y -= screenRoi.y;
 		}
-
+#pragma endregion
 #pragma region icp registration
-		size_t iterations = 200;
+		size_t iterations = 500;
 		//pcl::GeneralizedIterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
 		pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
 		icp.setEuclideanFitnessEpsilon(1e-8);
 		//.setTransformationEpsilon(1e-8);
-		//icp.setMaximumIterations(iterations);
+		icp.setMaximumIterations(iterations);
 		icp.setInputSource(source);
 		icp.setInputTarget(target);
 		icp.align(*result);
@@ -1309,7 +1361,7 @@ void ProjectorCamera::findOnDeskObject()
 			for (size_t index = 0; index < 4; ++index)
 			{
 				vpoints_four.push_back(vpoints[index]);
-				vertexDepth.push_back(averaImg.at<float>(vpoints[index].y, vpoints[index].x));
+				vertexDepth.push_back(averaImg.at<float>(vpoints[index].y, vpoints[index].x)); //at有点问题
 			}	
 			
 			calibDepToPro(vpoints_four, vertexDepth, output_1);  //如果距离过大，使用vpoints在投影仪坐标系下的坐标
@@ -1453,112 +1505,6 @@ void ProjectorCamera::findOnDeskObject()
 			outfile << output_2[kk].x << " " << output_2[kk].y << " " << output_2[kk].z << endl;
 		outfile.close();
 #pragma endregion
-
-		continue;
-
-        for(int dex=0;dex<vpoints.size();dex++)
-        {
-            cv::Point2f& point1 = vpoints[dex];
-            for(auto point2:temHand.approxCurve)
-            {
-                if(norm(point1 - cv::Point2f(point2.x, point2.y)) < 20)
-                {
-                    point1 = (point1 + cv::Point2f(point2.x, point2.y)) * 0.5;
-                    break;
-                }
-            }
-        }
-
-		clockwiseContour(vpoints);
-
-		//get depth
-		StereoProjection stereoProjectOld = stereoProjectDesk;
-		vector<cv::Point2f> lastVertex = stereoProjectDesk.cameraVertex;
-		vector<float>   lastDepth = stereoProjectDesk.vertexDepth;
-		stereoProjectDesk.cameraVertex.clear();
-		stereoProjectDesk.vertexDepth.clear();
-		if(lastVertex.size() == 0);
-		int corresNum = 0;
-		for (int jnd = 0; jnd<vpoints.size(); jnd++)
-		{
-			cv::Point2f& point = vpoints[jnd];
-			if (point.x<0 || point.x>depthImg.cols - 2 ||
-				point.y<0 || point.y>depthImg.rows - 2)
-				return;
-
-			float depth = averaImg.at<float>(point.y, point.x);
-			LOGD("stereo projection findOnDeskObject depth: %f", depth);
-			if (depth<750) return;
-
-			//circle(foreground_copy,point,2,COLOR_RED);
-			for (int subind = 0; subind<lastDepth.size(); subind++)
-			{
-				if (lastVertex.size()<lastDepth.size()) continue;
-				float dis = norm(lastVertex[subind] - point);
-				if (dis> 5 && dis<10)
-				{
-					LOGD("stereo projection findOnDeskObject dis: dis%f", dis);
-					point.x = (lastVertex[subind].x + point.x) / 2;
-					point.y = (lastVertex[subind].y + point.y) / 2;
-					depth = (depth + lastDepth[subind]) / 2;
-					corresNum++;
-					break;
-				}
-				else if (dis <= 5)
-				{
-					LOGD("stereo projection findOnDeskObject dis: dis%f", dis);
-					point.x = lastVertex[subind].x;
-					point.y = lastVertex[subind].y;
-					depth = (depth + lastDepth[subind]) / 2;
-					corresNum++;
-					break;
-				}
-			}
-			stereoProjectDesk.vertexDepth.push_back(depth);
-		}
-
-		//keep stable
-		if (corresNum != 4) 
-		{
-			vector<cv::Point3f> lastVertex3D = stereoProjectDesk.proVertex3D;
-			stereoProjectDesk.proVertex3D.clear();
-			stereoProjectDesk.cameraVertex = vpoints;
-			
-			calibDepToPro(stereoProjectDesk.cameraVertex, stereoProjectDesk.vertexDepth, stereoProjectDesk.proVertex3D);
-			stereoProjectDesk.center = rorec.center;
-			refineVerticals(stereoProjectDesk.proVertex3D);		
-
-			for (int ind = 0; ind<stereoProjectDesk.proVertex3D.size(); ind++)
-			{
-				cv::Point3f& point = stereoProjectDesk.proVertex3D[ind];
-				for (int subind = 0; subind<lastVertex3D.size(); subind++)
-				{
-					float dis = norm(lastVertex3D[subind] -  point);
-					if (dis> 6 && dis<11)
-					{
-						LOGD("stereo projection findOnDeskObject dis: dis%f", dis);
-						point.x = (lastVertex3D[subind].x + point.x) / 2;
-						point.y = (lastVertex3D[subind].y + point.y) / 2;
-						point.z = (lastVertex3D[subind].z + point.z) / 2;
-						break;
-					}
-					else if (dis <= 6)
-					{
-						LOGD("stereo projection findOnDeskObject dis: dis%f", dis);
-						point = lastVertex3D[subind];
-						break;
-					}
-				}
-			}
-			
-			stereoProjectDesk.valid = true;
-		}
-		else
-		{
-			stereoProjectDesk = stereoProjectOld;
-			stereoProjectDesk.valid = true;
-		}
-		stereoProjectDesk.boatDemo = boatDemo;
 	}
 	cv::imshow("foreground", foreground);
 	cv::waitKey(1);
