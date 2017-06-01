@@ -457,7 +457,7 @@ void ProjectorCamera::processing(cv::Mat& iRSrc, cv::Mat& depthSrc)
     }
 
     //depth image preprocessing
-    screenRoi.height = 335;
+   // screenRoi.height = 335;
 	frameId++;
 	depthImg = depthSrc(screenRoi);
 	depthImg.convertTo(depthImg, CV_32F);
@@ -1113,22 +1113,19 @@ void ProjectorCamera::findInAirObject()
 */
 void ProjectorCamera::findOnDeskObject()
 {
+	cv::cvtColor(colorImg, colorImg, CV_GRAY2BGR);
+	cv::Mat foreground_s;
+	cv::cvtColor(foreground, foreground_s, CV_GRAY2BGR);
+	float plate_max = 15000;  //constraint the plate area, upper bound for plate
+	float plate_min = 10000;  //lower bound for plate
+	bool outofBoundary = false;  //check if the points are out of boundary or not.
 
-	int num_big_object = 0;
-	float plate_max = 14600;  //constraint the plate area
-	float plate_min = 11600;
-	for (int ind = 0; ind < objects.size(); ind++)
-	{
-		if (objects[ind].cArea >= 6500)
-			num_big_object++;
-	}
-	cout << "num_big_object: " << num_big_object << endl;
 	//LOGF("Processing flow : %s", "findOnDeskObject start");
+	
 	for (int ind = 0; ind < objects.size(); ind++)
 	{
-	    LOGD("Processing flow findOnDeskObject: area%f", objects[ind].cArea);
-		std::cout <<" area "<<ind << ": " << objects[ind].cArea << endl;
-		if (objects[ind].cArea<6500) continue;
+	    //LOGD("Processing flow findOnDeskObject: object %d, area %f\n", ind, objects[ind].cArea);
+		if (objects[ind].cArea<plate_min) continue;
 
 		TouchHand temHand;
 		cv::Mat contourMat = cv::Mat(objects[ind].contour);
@@ -1137,82 +1134,142 @@ void ProjectorCamera::findOnDeskObject()
 
 		cv::Point2f ppt[4];
 		vector<cv::Point2f> vpoints(ppt, ppt + 4);
+		cv::Scalar center;
+		cv::Point centerPoint;
+		//std::cout << "temHand.approxCurve.size(): "<<temHand.approxCurve.size() << endl;
 #pragma region hand in the view, beside or on the plate
 		if (temHand.approxCurve.size() != 4)
 		{   
-			if (num_big_object >= 2) continue;  //这里我们只处理手放在盘子上时的情形，而剔除手和盘子同时在图像内，但两者分离的情况
+			if (stereoProjectDesk.lastId == 0) continue;  //do not project when we place the plate into the scene for the first time.
 
 			cv::Mat hand, foreground_f;
 			cv::threshold(foreground, hand, 36, 255, CV_THRESH_BINARY);
 			cv::threshold(foreground, foreground_f, nearSurFaceThresh, 255, CV_THRESH_BINARY);
 			cv::Mat plate = foreground_f - hand; //binary: substract hand from the foreground image.
-			cv::Mat plate_show;
+			//if (stereoProjectDesk.lastId % 50 == 0)
+			//	cv::imwrite("plate" + intTostring(stereoProjectDesk.lastId / 50) + ".jpg", plate);
 			plate.convertTo(plate, CV_8UC1);     //used for findContours
-			cv::cvtColor(plate, plate_show, CV_GRAY2BGR);
 			vector< vector<cv::Point> > contours;
-
-			findContours(plate, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
+			//cv::imshow("plate", plate);
+			//cv::waitKey(1);
+			cv::findContours(plate, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
 			vector<cv::Point> corner;
 
+			vector<cv::Point2f> tmp_vpoints;
 			for (size_t index = 0; index < contours.size(); ++index)
 			{
 				// double contourArea(contour, oriented=false)  contour - input vector of 2D points, stored in std::vector or Mat
-				double area = contourArea(contours[index]);                 //轮廓面积
-				if (area < 2000)  //don't care noise
+				double area = contourArea(contours[index]);                                  //轮廓面积
+				if (area < 5000)  //don't care noise
+					continue;
+				tmp_vpoints.clear();
+			
+				cv::RotatedRect rorec = minAreaRect(contours[index]);                      //寻找包含所有输入2D点的最小旋转矩形
+				rorec.points(ppt);
+				for (int ind = 0; ind < 4; ++ind)
+					tmp_vpoints.push_back(ppt[ind]);
+
+				clockwiseContour(tmp_vpoints);
+				vector<float> v_depth;
+				vector<cv::Point3f> vp_pro;
+				for (int ind = 0; ind < tmp_vpoints.size(); ++ind)
+				{
+					if (tmp_vpoints[ind].x<5 || tmp_vpoints[ind].x>screenRoi.width - 5 || tmp_vpoints[ind].y<5 || tmp_vpoints[ind].y>screenRoi.height - 5)
+					{
+						outofBoundary = true;
+						break;
+					}
+					v_depth.push_back(averaImg.at<float>(tmp_vpoints[ind].y, tmp_vpoints[ind].x));
+				}
+				if (outofBoundary)
+					break;
+				
+				calibCamToPro(tmp_vpoints, v_depth, vp_pro);
+				//std::cout << "points num: " << vp_pro.size() << " dis: ";
+				bool isNotPlate = false;  //to check this contour is a plate or not.
+				for (int ind = 0; ind < vp_pro.size(); ++ind)
+				{
+					double dist;
+					if (ind == vp_pro.size() - 1)
+						dist = abs(norm(vp_pro[0] - vp_pro[ind]));	
+					else
+						dist = abs(norm(vp_pro[ind + 1] - vp_pro[ind]));
+
+					if (dist < 160 || abs(norm(vp_pro[1] - vp_pro[0])) - abs(norm(vp_pro[2] - vp_pro[1])) > 30 )
+					{
+						isNotPlate = true;
+						break;
+					}	   
+				}
+				if (isNotPlate)
 					continue;
 
-				//drawContours(plate_show, contours, index, cv::Scalar(0, 255, 0), 2);       //画出轮廓线
-				approxPolyDP(contours[index], corner, 15, true);                           //用多边形去拟合轮廓，找到角点
-				for (size_t ind = 0; ind < corner.size(); ++ind)                           //在src中绘制角点
-					cv::circle(plate_show, corner[ind], 3, cv::Scalar(0, 0, 255), -1);
-
-				//minAreaRect: finds a rotated rectangle of the minimum area enclosing the input 2D input set
-				cv::RotatedRect rorec = minAreaRect(contours[index]);                      //寻找包含所有输入2D点的最小旋转矩形
-				cv::Point2f ppt[4];
-				rorec.points(ppt);
-				for (size_t ind = 0; ind < 4; ++ind)
-					cv::circle(plate_show, ppt[ind], 3, cv::Scalar(255, 255, 0), -1);
+				vpoints[0] = ppt[0];
+				vpoints[1] = ppt[1];
+				vpoints[2] = ppt[2];
+				vpoints[3] = ppt[3];
+				clockwiseContour(vpoints);
+				center = mean(vpoints);
+				centerPoint = cv::Point(center.val[0], center.val[1]);
+				float centerDepth = foreground.at<float>(centerPoint.y, centerPoint.x);
+				if (centerDepth < 15) boatDemo = true;
+				vpoints.push_back(centerPoint);
 			}
-			cv::imshow("plate_show", plate_show);
-			cv::waitKey(1);
-			continue;
 		}
 #pragma endregion
-
-		if (objects[ind].cArea<plate_min || objects[ind].cArea>plate_max) continue; //to remove hand
-		cv::Scalar center = mean(cv::Mat(temHand.approxCurve));
-		cv::Point centerPoint = cv::Point(center.val[0], center.val[1]);
-		float centerDepth = foreground.at<float>(centerPoint.y, centerPoint.x);
-		if (centerDepth < 15) boatDemo = true;
-		if (centerDepth > 100) continue;
-		//is a rectangle
-		if (abs(norm(temHand.approxCurve[0] - temHand.approxCurve[1])
-			- norm(temHand.approxCurve[2] - temHand.approxCurve[3])) > 40 ||
-			abs(norm(temHand.approxCurve[2] - temHand.approxCurve[1])
-			- norm(temHand.approxCurve[0] - temHand.approxCurve[3])) > 40)
+#pragma region just plate
+		else
+		{
+			if (objects[ind].cArea<plate_min || objects[ind].cArea>plate_max) continue; //to remove hand，which also has four verticals.
+			center = mean(cv::Mat(temHand.approxCurve));
+			centerPoint = cv::Point(center.val[0], center.val[1]);
+			float centerDepth = foreground.at<float>(centerPoint.y, centerPoint.x);
+			if (centerDepth < 15) boatDemo = true;
+			if (centerDepth > 100) continue;
+			//is a rectangle, to remove hand，which also has four verticals, and its area is between the boundary.
+			if (abs(norm(temHand.approxCurve[0] - temHand.approxCurve[1])
+				- norm(temHand.approxCurve[2] - temHand.approxCurve[3])) > 40 ||
+				abs(norm(temHand.approxCurve[2] - temHand.approxCurve[1])
+				- norm(temHand.approxCurve[0] - temHand.approxCurve[3])) > 40)
 				continue;
 
-		//get four verticals 
-		cv::RotatedRect rorec = minAreaRect(objects[ind].contour);
-		rorec.points(ppt);
-		vpoints[0] = temHand.approxCurve[0];
-		vpoints[1] = temHand.approxCurve[1];
-		vpoints[2] = temHand.approxCurve[2];
-		vpoints[3] = temHand.approxCurve[3];
-		for (size_t index = 0; index < 4; ++index)
-		{
-			for (size_t ind = 0; ind < 4; ++ind)
+			//get four verticals 
+			cv::RotatedRect rorec = minAreaRect(objects[ind].contour);
+			rorec.points(ppt);
+			vpoints[0] = temHand.approxCurve[0];
+			vpoints[1] = temHand.approxCurve[1];
+			vpoints[2] = temHand.approxCurve[2];
+			vpoints[3] = temHand.approxCurve[3];
+			for (size_t index = 0; index < 4; ++index)
 			{
-				if (norm(vpoints[index] - ppt[ind]) < 20)
-					vpoints[index] = cv::Point2f((vpoints[index].x + ppt[ind].x) / 2, (vpoints[index].y + ppt[ind].y) / 2);
+				for (size_t ind = 0; ind < 4; ++ind)
+				{
+					if (norm(vpoints[index] - ppt[ind]) < 20)
+						vpoints[index] = cv::Point2f((vpoints[index].x + ppt[ind].x) / 2, (vpoints[index].y + ppt[ind].y) / 2);
+				}
 			}
+			clockwiseContour(vpoints);
+			center = mean(vpoints);
+			centerPoint = cv::Point(center.val[0], center.val[1]);
+			vpoints.push_back(centerPoint);
 		}
-		clockwiseContour(vpoints);
-		center = mean(vpoints);
-		centerPoint = cv::Point(center.val[0], center.val[1]);
-		vpoints.push_back(centerPoint);
+#pragma endregion		
 
-#pragma region read camera parameters and store them by Eigen, it is convinient for calculating
+#pragma region check the points out of boundary or not
+		bool outofBoundary = false;
+		for (size_t k = 0; k < vpoints.size(); ++k) //图像像素坐标系下的点在相机坐标系下的物理坐标
+		{
+			if (vpoints[k].x<5 || vpoints[k].x>screenRoi.width - 5 || vpoints[k].y<5 || vpoints[k].y>screenRoi.height - 5)
+			{
+				outofBoundary = true;
+				break;
+			}		
+		}
+		if (outofBoundary)
+			continue;
+#pragma endregion
+
+#pragma region read camera parameters and store them by Eigen, it is convinient for calculation
 		double cx = depth_KK.at<double>(0, 2);
 		double cy = depth_KK.at<double>(1, 2);
 		double fx = depth_KK.at<double>(0, 0);
@@ -1232,6 +1289,7 @@ void ProjectorCamera::findOnDeskObject()
 		ColToProT << colToProT.at<double>(0, 0), colToProT.at<double>(1, 0), colToProT.at<double>(2, 0);
 #pragma endregion
 
+		cout << "read camera parameter successfully" << endl;
 #pragma region read the template and construct target point cloud
 		pcl::PointCloud<pcl::PointXYZ>::Ptr target(new pcl::PointCloud<pcl::PointXYZ>);
 		pcl::PointCloud<pcl::PointXYZ>::Ptr source(new pcl::PointCloud<pcl::PointXYZ>);
@@ -1243,7 +1301,7 @@ void ProjectorCamera::findOnDeskObject()
 			return;
 		}
 #pragma endregion
-
+		cout << "read the template successfully" << endl;
 #pragma region construct source point cloud, select four corner points and the center
 
 		source->width = target->points.size();
@@ -1252,8 +1310,11 @@ void ProjectorCamera::findOnDeskObject()
 		source->points.resize(source->width * source->height);
 		Eigen::Matrix<double, 3, 1> Tmp;
 		Eigen::Matrix<double, 3, 1> PointInCol;
+		cout << "vpoints size: " << vpoints.size() << endl;
 		for (size_t k = 0; k < vpoints.size(); ++k) //图像像素坐标系下的点在相机坐标系下的物理坐标
 		{
+			circle(foreground_s, vpoints[k], 3, cv::Scalar(0, 0, 255), -1);
+			cout << k <<" points: ( " << vpoints[k].x << "," << vpoints[k].y << ")" << endl;
 			double depthVal = averaImg.at<float>(vpoints[k].y, vpoints[k].x);
 			Tmp(0, 0) = depthVal * (vpoints[k].x + screenRoi.x - cx)*1.0 / fx;
 			Tmp(1, 0) = depthVal * (vpoints[k].y + screenRoi.y - cy)*1.0 / fy;
@@ -1262,11 +1323,11 @@ void ProjectorCamera::findOnDeskObject()
 			source->points[k].x = PointInCol(0, 0);
 			source->points[k].y = PointInCol(1, 0);
 			source->points[k].z = PointInCol(2, 0);
-			cout << "( " << PointInCol(0, 0) << "," << PointInCol(1, 0) << ", " << PointInCol(2, 0) <<")"<< endl;
+			//cout << "( " << PointInCol(0, 0) << "," << PointInCol(1, 0) << ", " << PointInCol(2, 0) <<")"<< endl;
 		}
-		
 #pragma endregion
-
+		cout << "construct source point successfully" << endl;
+		/*
 #pragma region remove lens distortion
 		//去除镜头的径向畸变
 		for (size_t index = 0; index < vpoints.size(); ++index)
@@ -1282,8 +1343,10 @@ void ProjectorCamera::findOnDeskObject()
 			vpoints[mk].y -= screenRoi.y;
 		}
 #pragma endregion
+		*/
+
 #pragma region icp registration
-		size_t iterations = 500;
+		size_t iterations = 300;
 		//pcl::GeneralizedIterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
 		pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
 		icp.setEuclideanFitnessEpsilon(1e-8);
@@ -1303,7 +1366,7 @@ void ProjectorCamera::findOnDeskObject()
 		R_inv = RR.inverse();
 		TT << transformation(0, 3), transformation(1, 3), transformation(2, 3);
 #pragma endregion
-
+		cout << "ICP successfully" << endl;
 #pragma region move the key points in template to the right place by RT matrix achieved by icp algorithm
 		Eigen::Matrix<double, 3, 4> Corner;
 		Eigen::Matrix<double, 3, 1> Point;
@@ -1334,7 +1397,7 @@ void ProjectorCamera::findOnDeskObject()
 		reg[3] = cv::Point3f(CornerInPro(0, 2), CornerInPro(1, 2), CornerInPro(2, 2));
 
 #pragma endregion
-
+		cout << "move the key points successfully" << endl;
 #pragma region keep stable
 		//（1）匹配失败处理：如果匹配完的点与vpoints距离不大，就用匹配完的点（更精确）；否则使用vpoints（匹配失败）。
 		float max_dis_1 = 0;
@@ -1350,7 +1413,7 @@ void ProjectorCamera::findOnDeskObject()
 			if (min_dis > max_dis_1)
 				max_dis_1 = min_dis; //匹配出的4个点和检测出的4个点的最大距离
 		}
-		cout << "first stage: " << max_dis_1 << endl;
+		cout << "first stage: " << max_dis_1;
 		float first_diff = 15;
 		float second_diff = 6;
 		vector<cv::Point3f> output_1;
@@ -1366,13 +1429,13 @@ void ProjectorCamera::findOnDeskObject()
 			
 			calibDepToPro(vpoints_four, vertexDepth, output_1);  //如果距离过大，使用vpoints在投影仪坐标系下的坐标
 			refineVerticals(output_1);
-			cout << "I use vpoints" << endl;
+			cout << ", I use vpoints" << endl;
 			second_diff = 8; //vpoints的波动比较大
 		}
 		else
 		{ 
 			output_1 = reg;  //否则使用icp匹配出的点坐标
-			cout << "I use icp" << endl;
+			cout << ", I use icp" << endl;
 		}
 			
 		//（2）防抖处理：如果（1）输出的点与上一次的点距离不大，就用上一次的点（防抖动）；否则使用本次的点（物体被移动）。
@@ -1394,7 +1457,6 @@ void ProjectorCamera::findOnDeskObject()
 		}
 			
 		stereoProjectDesk.lastId++;
-		cout << "last Id: " << stereoProjectDesk.lastId<< endl;
 	    	
 		for (size_t index = 0; index <stereoProjectDesk.proVertex3D.size(); ++index)
 		{
@@ -1418,11 +1480,11 @@ void ProjectorCamera::findOnDeskObject()
 				max_dis_2 = min_dis;
 		}
 
-		cout << "second stage: " << max_dis_2 << endl;
+		cout << "second stage: " << max_dis_2;
 		if (max_dis_2 <= second_diff) // 0~6
 		{
 			output_2 = lastVertex3D;
-			cout << "I use " << endl;
+			cout << ", I use last" << endl;
 		}
 		else if (max_dis_2 > second_diff  && max_dis_2 < second_diff * 2) //6~10
 		{
@@ -1441,11 +1503,12 @@ void ProjectorCamera::findOnDeskObject()
 						
 				}
 			}
+			cout << ", I use mixed" << endl;
 		}
 		else // >10
 		{
 			output_2 = output_1;
-			cout << "I use current" << endl;
+			cout << ", I use current" << endl;
 		}
 		
 		clockwiseContour(output_2);  //counter clockwise the points
@@ -1469,11 +1532,11 @@ void ProjectorCamera::findOnDeskObject()
 			show.col(ii) = DepToColR.inverse()*(show.col(ii) - DepToColT);
 			show(0, ii) = show(0, ii)*fx / show(2, ii) + cx - screenRoi.x;
 			show(1, ii) = show(1, ii)*fy / show(2, ii) + cy - screenRoi.y;  //匹配完的点，转到图像坐标系下
-			circle(foreground, cv::Point2f(show(0, ii), show(1, ii)), 5, cv::Scalar(0, 0, 255), -1);
-			circle(colorImg, cv::Point2f(show(0, ii), show(1, ii) - 10), 5, cv::Scalar(0, 0, 255), -1);
+			circle(colorImg, cv::Point2f(show(0, ii), show(1, ii) + 10), 5, cv::Scalar(0, 0, 255), -1);
 		}
 #pragma endregion
-
+		cout << "keep stable successfully" << endl;
+		/*
 #pragma region debug
 		ofstream outfile;
 		outfile.open("max_dis_1.txt", ios::app);
@@ -1505,8 +1568,9 @@ void ProjectorCamera::findOnDeskObject()
 			outfile << output_2[kk].x << " " << output_2[kk].y << " " << output_2[kk].z << endl;
 		outfile.close();
 #pragma endregion
+		*/
 	}
-	cv::imshow("foreground", foreground);
+	cv::imshow("foreground", foreground_s);
 	cv::waitKey(1);
 	cv::imshow("irimage", colorImg);
 	cv::waitKey(1);

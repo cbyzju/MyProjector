@@ -36,14 +36,14 @@ int  main(int argc, char* argv[])
 		depthImg = astradata.cvRawImg16U.clone();
 		colorImg = astradata.cvIrImg.clone();
 		depthImg.convertTo(depthImg, CV_32F);
-		cv::flip(colorImg, colorImg, 1);
-		cv::flip(depthImg, depthImg, 1);		
-		
+		//cv::flip(colorImg, colorImg, 1);
+		//cv::flip(depthImg, depthImg, 1);		
+		cv::flip(colorImg, colorImg, 0);
+		cv::flip(depthImg, depthImg, 0);
 		rsPeojection.depthImg = depthImg;
 		if (!rsPeojection.calibrated) rsPeojection.calibrationFixed();
 		rsPeojection.processing(colorImg, depthImg);
-		
-
+	
 	}
 	return 0;
 }
